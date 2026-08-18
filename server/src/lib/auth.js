@@ -51,6 +51,12 @@ export const requireAdmin = (req, _res, next) => {
 
 export const isWorkspaceAdmin = (user) => ['owner', 'admin'].includes(user.role);
 
+// Subquery (with $1-based params) yielding the space ids the user can read.
+export const accessibleSpacesQuery = (user) =>
+  isWorkspaceAdmin(user)
+    ? { sql: 'SELECT id FROM spaces', params: [] }
+    : { sql: 'SELECT space_id AS id FROM space_members WHERE user_id = $1', params: [user.id] };
+
 // Resolve the caller's effective role in a space: workspace owners/admins get
 // space admin everywhere; everyone else needs an explicit membership row.
 export async function spaceRole(user, spaceId) {

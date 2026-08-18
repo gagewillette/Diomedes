@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { migrate } from './db.js';
+import { initSearch, searchHealth } from './search/index.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import spaceRoutes from './routes/spaces.js';
@@ -24,6 +25,8 @@ async function main() {
   const redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
   redis.on('error', (err) => console.error('redis error', err.message));
   await redis.connect();
+
+  initSearch(redis);
 
   const app = express();
   app.disable('x-powered-by');
@@ -47,7 +50,7 @@ async function main() {
     })
   );
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/health', async (_req, res) => res.json({ ok: true, search: await searchHealth() }));
   app.use('/api/auth', authRoutes(redis));
   app.use('/api/users', userRoutes);
   app.use('/api/spaces', spaceRoutes);

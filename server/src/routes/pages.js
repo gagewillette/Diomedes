@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { q, pool } from '../db.js';
+import { q } from '../db.js';
 import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
-import { requireAuth, assertSpaceRole, getPage, isWorkspaceAdmin } from '../lib/auth.js';
+import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
+import { searchPages, notePageChanged } from '../search/index.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -9,10 +10,7 @@ router.use(requireAuth);
 const TSV_SQL = `to_tsvector('english', left(coalesce($1,'') || ' ' || coalesce($2,''), 500000))`;
 const VERSION_INTERVAL_MIN = 10;
 
-const accessibleSpacesCTE = (user) =>
-  isWorkspaceAdmin(user)
-    ? { sql: 'SELECT id FROM spaces', params: [] }
-    : { sql: 'SELECT space_id AS id FROM space_members WHERE user_id = $1', params: [user.id] };
+const accessibleSpacesCTE = accessibleSpacesQuery;
 
 // ---- listing ----
 
@@ -68,6 +66,7 @@ router.post(
        VALUES ($1, $2, $3, $4, $5, $5) RETURNING *`,
       [spaceId, parentId, title, pos[0].next, req.user.id]
     );
+    notePageChanged(rows[0].id, rows[0].updated_at);
     res.status(201).json({ page: rows[0] });
   })
 );
@@ -128,6 +127,7 @@ router.patch(
        WHERE id = $1 RETURNING id, title, icon, updated_at`,
       [page.id, req.user.id, newTitle, icon, JSON.stringify(newContent), text]
     );
+    notePageChanged(rows[0].id, rows[0].updated_at);
     res.json({ page: rows[0] });
   })
 );
@@ -203,6 +203,7 @@ router.post(
       if (!rows[0] || rows[0].deleted_at) parentId = null;
     }
     await q('UPDATE pages SET deleted_at = NULL, parent_id = $2 WHERE id = $1', [page.id, parentId]);
+    if (page.embedding_status !== 'ready') notePageChanged(page.id, page.updated_at);
     res.json({ ok: true });
   })
 );
@@ -266,12 +267,13 @@ router.post(
       req.user.id,
     ]);
     const text = extractText(version.content);
-    await q(
+    const { rows: restored } = await q(
       `UPDATE pages SET title = $2, content = $3, text_content = $4,
               tsv = ${TSV_SQL.replace('$1', '$2').replace('$2', '$4')},
-              updated_by = $5, updated_at = now() WHERE id = $1`,
+              updated_by = $5, updated_at = now() WHERE id = $1 RETURNING id, updated_at`,
       [page.id, version.title, JSON.stringify(version.content), text, req.user.id]
     );
+    notePageChanged(restored[0].id, restored[0].updated_at);
     res.json({ ok: true });
   })
 );
@@ -409,23 +411,12 @@ router.get(
   asyncRoute(async (req, res) => {
     const query = (req.query.q || '').trim();
     if (!query) return res.json({ results: [] });
-    const acc = accessibleSpacesCTE(req.user);
-    const spaceFilter = req.query.space ? ` AND p.space_id = $${acc.params.length + 2}` : '';
-    const params = [...acc.params, query];
-    if (req.query.space) params.push(req.query.space);
-    const { rows } = await q(
-      `SELECT p.id, p.space_id, p.title, p.icon, p.updated_at, s.name AS space_name, s.slug AS space_slug,
-              ts_rank(p.tsv, plainto_tsquery('english', $${acc.params.length + 1})) AS rank,
-              ts_headline('english', left(p.text_content, 4000), plainto_tsquery('english', $${acc.params.length + 1}),
-                          'StartSel=[[[, StopSel=]]], MaxFragments=2, MaxWords=18, MinWords=6') AS snippet
-       FROM pages p JOIN spaces s ON s.id = p.space_id
-       WHERE p.deleted_at IS NULL AND p.space_id IN (${acc.sql})
-         AND (p.tsv @@ plainto_tsquery('english', $${acc.params.length + 1}) OR p.title ILIKE '%' || $${acc.params.length + 1} || '%')
-         ${spaceFilter}
-       ORDER BY rank DESC, p.updated_at DESC LIMIT 25`,
-      params
-    );
-    res.json({ results: rows });
+    const results = await searchPages({
+      user: req.user,
+      query,
+      space: req.query.space || null,
+    });
+    res.json({ results });
   })
 );
 

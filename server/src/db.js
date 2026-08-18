@@ -116,6 +116,25 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 `;
 
+const VECTOR_SCHEMA = `
+CREATE TABLE IF NOT EXISTS page_chunks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_id uuid NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  chunk_index int NOT NULL,
+  content text NOT NULL,
+  embedding vector(1536),
+  token_count int NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (page_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS page_chunks_page_idx ON page_chunks (page_id);
+CREATE INDEX IF NOT EXISTS page_chunks_embedding_idx ON page_chunks USING hnsw (embedding vector_cosine_ops);
+`;
+
+// Set by migrate(); semantic search stays off when the extension is missing so
+// a plain postgres:16 image keeps working.
+export let vectorAvailable = false;
+
 export async function migrate() {
   // Wait for postgres to accept connections (fresh compose stacks race the db).
   for (let attempt = 1; ; attempt++) {
@@ -131,5 +150,22 @@ export async function migrate() {
   await q(SCHEMA);
   // additive migrations for existing deployments
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'`);
+  await q(
+    `ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding_status text NOT NULL DEFAULT 'disabled'
+     CHECK (embedding_status IN ('pending','processing','ready','failed','disabled'))`
+  );
+  try {
+    await q('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    await q('CREATE INDEX IF NOT EXISTS pages_title_trgm_idx ON pages USING gin (title gin_trgm_ops)');
+  } catch (err) {
+    console.log('pg_trgm unavailable, skipping fuzzy title index:', err.message);
+  }
+  try {
+    await q('CREATE EXTENSION IF NOT EXISTS vector');
+    await q(VECTOR_SCHEMA);
+    vectorAvailable = true;
+  } catch (err) {
+    console.log('pgvector unavailable, semantic search cannot be enabled:', err.message);
+  }
   console.log('database schema ready');
 }

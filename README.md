@@ -9,7 +9,8 @@ commands, Word-style smooth caret, tables, task lists, syntax-highlighted code, 
 math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads — and three
 integrated diagram editors: **Mermaid**, **Excalidraw**, and **Draw.io**.
 
-**Organization**: spaces with nested page trees, full-text search, favorites, page
+**Organization**: spaces with nested page trees, full-text search (optionally
+**semantic** — see below), favorites, page
 history with restore, threaded comments, trash, public share links, Markdown
 import/export, dark mode.
 
@@ -57,6 +58,43 @@ data at fixed paths (this is what the author's server does):
 | `/mnt/storage/diomedes/db` | PostgreSQL data |
 | `/mnt/storage/diomedes/redis` | Redis persistence (sessions survive restarts) |
 | `/mnt/storage/diomedes/app-data` | Uploaded files/attachments |
+
+## Semantic search (optional)
+
+Search is Postgres full-text by default: fast, free, and exactly as it has always
+worked. Turning semantic search on adds vector similarity alongside it, so
+"how do I roll back a release" finds the runbook that only ever says "revert to
+the previous tag".
+
+```bash
+# .env
+SEMANTIC_SEARCH_ENABLED=true
+OPENAI_API_KEY=sk-...
+```
+
+It needs the `pgvector/pgvector:pg16` db image (already the default in
+`docker-compose.example.yml` — a drop-in replacement that reuses an existing
+`postgres:16` volume). After switching it on, embed the pages you already have:
+
+```bash
+docker compose exec diomedes npm run backfill:embeddings --prefix server
+```
+
+From then on pages are chunked and embedded by a background worker whenever they
+are saved, so writes stay fast. Results fuse full-text ranking and vector
+similarity by reciprocal rank fusion. If the embedding API is slow or down,
+search silently falls back to full-text rather than failing.
+
+`GET /api/health` reports the active mode, how much of the corpus is embedded,
+the queue backlog, and the running embedding spend:
+
+```json
+{"ok":true,"search":{"mode":"hybrid","coverage":{"total":412,"ready":412,"chunks":1830},
+ "queueDepth":0,"embeddings":{"tokens":184320,"estimatedUsd":0.0037}}}
+```
+
+Leaving `SEMANTIC_SEARCH_ENABLED=false` costs nothing: no embedding calls, no
+background work, no vector tables touched.
 
 ## Versioning & releases
 
