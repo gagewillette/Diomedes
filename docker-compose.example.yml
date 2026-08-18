@@ -6,7 +6,7 @@
 #   docker compose up -d
 #
 # The app image is pulled from GHCR — you do not need to build anything locally.
-# Watchtower polls every 5 minutes and restarts the app when a new image is
+# Watchtower polls every minute and restarts the app when a new image is
 # published. Postgres and Redis are pinned to exact patch versions and are left
 # alone by watchtower; upgrade them deliberately.
 
@@ -77,7 +77,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Only needed if the image is private — see README.
       # - ~/.docker/config.json:/config.json:ro
-    command: --interval 300 --label-enable --cleanup
+    command: --interval 60 --label-enable --cleanup
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 

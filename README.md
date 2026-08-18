@@ -73,7 +73,7 @@ Published tags: `:latest` (default branch), `:1.1.0`, `:1.1`, `:sha-abc1234`.
 ## Auto-deployment
 
 `docker-compose.example.yml` includes a **watchtower** container that polls GHCR
-every 5 minutes and restarts the app when the tag it runs points at a new image.
+every minute and restarts the app when the tag it runs points at a new image.
 `--label-enable` means it only touches containers carrying
 
 ```yaml

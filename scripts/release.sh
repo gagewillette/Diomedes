@@ -10,7 +10,7 @@
 # Actions then builds and pushes ghcr.io/<owner>/diomedes with tags
 # :<version>, :<major>.<minor>, :sha-<short>, and — for builds on the default
 # branch — :latest. Servers running the :latest tag pick the new image up via
-# watchtower within ~5 minutes; nothing else to do.
+# watchtower within a minute; nothing else to do.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
