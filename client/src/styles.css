@@ -8,9 +8,10 @@
 }
 
 /* ---------- smooth (Word-style) caret ---------- */
+.gd-editor-wrap { position: relative; }
 .gd-caret-hidden .gd-editor { caret-color: transparent; }
 .gd-smooth-caret {
-  position: fixed;
+  position: absolute;
   width: 2px;
   border-radius: 1px;
   background: var(--mantine-color-blue-6);

@@ -20,12 +20,19 @@ export default function SmoothCaret({ editor }) {
           return;
         }
         try {
+          // Position relative to the editor wrap (absolute inside a relative parent)
+          // rather than viewport-fixed: a transformed ancestor turns `position: fixed`
+          // into `position: absolute` relative to that ancestor, which threw the
+          // caret across the page whenever `.gd-fade-in` or Mantine wrappers were
+          // in effect. Subtracting the wrap's rect makes the reference frame explicit.
           const { head } = editor.state.selection;
           const coords = editor.view.coordsAtPos(head);
+          const wrap = el.offsetParent?.getBoundingClientRect();
+          if (!wrap) return;
           const height = Math.max(coords.bottom - coords.top, 14);
           el.style.opacity = '1';
-          el.style.left = `${coords.left}px`;
-          el.style.top = `${coords.top}px`;
+          el.style.left = `${coords.left - wrap.left}px`;
+          el.style.top = `${coords.top - wrap.top}px`;
           el.style.height = `${height}px`;
           // restart the blink cycle so the caret is solid while moving
           el.style.animation = 'none';
