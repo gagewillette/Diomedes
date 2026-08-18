@@ -1,0 +1,83 @@
+# Diomedes — Docmost Feature Mapping
+
+Research summary of what Docmost offers (from docmost.com/docs and the GitHub README),
+and how Diomedes covers each capability. Diomedes is a from-scratch implementation —
+no Docmost code is reused (Docmost is AGPL; this avoids any licensing entanglement).
+
+## Editor
+
+| Docmost capability | Diomedes |
+|---|---|
+| Rich-text editor (TipTap/ProseMirror) | ✅ Same foundation: TipTap 2 |
+| Markdown paste with auto-formatting | ✅ Pasted markdown converts to rich blocks (tiptap-markdown) |
+| Markdown input shortcuts (`#`, `-`, `1.`, `[ ]`, `>`, ``` ` ``` , `---`, `**bold**`…) | ✅ |
+| Slash command menu (`/`) | ✅ Text, H1–H3, lists, to-do, quote, code, divider, table, image, video, file, callout, toggle, math, Mermaid, Excalidraw, Draw.io, YouTube, iframe embed |
+| Floating format toolbar on selection | ✅ Bold/italic/underline/strike/code/link/highlight/color/alignment, block type |
+| Tables (resize, row/col ops, header) | ✅ TipTap tables with column resizing and row/col menu |
+| Code blocks with syntax highlighting | ✅ highlight.js via lowlight, language picker |
+| Task lists / to-do | ✅ |
+| Callouts (info/warning/danger/success) | ✅ Custom node |
+| Toggle blocks | ✅ Custom collapsible node |
+| Math (inline + block, KaTeX) | ✅ KaTeX rendering of `$…$` |
+| Mermaid diagrams | ✅ Live-rendered Mermaid node with code editor |
+| Excalidraw diagrams | ✅ Full Excalidraw editor in a modal, scene stored in the doc |
+| Draw.io diagrams | ✅ Full diagrams.net editor in a modal (embed.diagrams.net postMessage integration); XML + SVG preview stored in the doc |
+| Images / video / file attachments | ✅ Upload to server-local storage, drag-drop and paste images |
+| Embeds (YouTube, iframe → Airtable/Loom/Miro/Figma/etc.) | ✅ YouTube node + generic iframe embed node (paste any embed URL) |
+| @-mention users | ✅ |
+| @-mention pages | ➖ Use normal links to pages |
+| Emoji `:search:` | ➖ Use OS emoji picker (Win+. / Cmd+Ctrl+Space) |
+| Find & replace in page | ➖ Browser Ctrl+F works for finding |
+| Text color / highlight color | ✅ |
+| Sub/superscript, underline, strikethrough | ✅ |
+| Drag handle block reordering | ➖ Not in v1 (cut/paste blocks works) |
+| Synced blocks, Status chips, Date chip, Subpages block, page labels | ➖ Not in v1 |
+| AI features | ➖ Intentionally excluded |
+
+## Collaboration & content management
+
+| Docmost capability | Diomedes |
+|---|---|
+| Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ➖ v1 uses autosave (800 ms debounce), last-write-wins + full version history for recovery. Real-time CRDT sync is the one large omission |
+| Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
+| Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
+| Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |
+| Trash / restore pages | ✅ Soft-delete with per-space trash, restore, permanent delete |
+| Favorites / starred pages | ✅ |
+| Recently updated pages | ✅ Home dashboard |
+| PDF export / printing | ✅ Print stylesheet (browser Print → PDF) |
+| Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse). Notion/Confluence zips ➖ |
+| Export: Markdown / HTML | ✅ Per-page export to .md and .html |
+| Public page sharing via link | ✅ Token links, revocable, read-only, no login needed |
+| Translations (10+ languages) | ➖ English only |
+| Dark mode / themes | ✅ Light/dark toggle |
+
+## Organization, users & permissions
+
+| Docmost capability | Diomedes |
+|---|---|
+| Workspaces | ✅ Single workspace (this is a personal server) |
+| Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
+| Nested page tree with reordering | ✅ Infinite nesting, move up/down/indent/outdent + move-to-space |
+| Groups | ➖ Direct per-user space membership instead (small user count) |
+| Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
+| Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |
+| Email invitations + SMTP | ✅→ Replaced by direct admin user creation with username + password (no SMTP dependency; your docmost SMTP was never configured anyway) |
+| SSO/OIDC/MFA (Enterprise) | ➖ Username/password sessions (Redis-backed), login rate limiting |
+| Deactivate users | ✅ |
+| Admin password reset | ✅ |
+| Page-level permissions (Enterprise) | ➖ Space-level scoping only |
+| API & MCP | ✅ Bearer API tokens (Settings → API tokens) work on every endpoint alongside sessions; full surface documented in docs/API.md with an MCP tool sketch |
+| User preferences (docmost: theme/language) | ✅ Per-user editor prefs: font, size, line spacing, page width, smooth caret, animations |
+
+## Infrastructure parity
+
+| Docmost deployment trait | Diomedes |
+|---|---|
+| Node.js app container | ✅ node:22-alpine, multi-stage build from source in `server/` + `client/` |
+| PostgreSQL 16 | ✅ same image (postgres:16-alpine) |
+| Redis 7 | ✅ same image (redis:7-alpine), holds sessions + rate limits |
+| Local file storage volume | ✅ /mnt/storage/diomedes/app-data ↔ /app/data/storage |
+| DB/Redis volumes on /mnt/storage | ✅ /mnt/storage/diomedes/{db,redis} |
+| APP_URL / APP_SECRET / DATABASE_URL / REDIS_URL env | ✅ same variable names |
+| Cloudflare tunnel exposure | ✅ Serves plain HTTP on host port 3000; TLS terminates at Cloudflare (same as docmost) |
