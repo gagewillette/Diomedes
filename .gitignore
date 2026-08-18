@@ -6,3 +6,4 @@ server/data/
 .DS_Store
 docker-compose.yml
 docker-compose.override.yml
+/data/
