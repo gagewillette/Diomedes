@@ -28,22 +28,29 @@ in [FEATURES.md](FEATURES.md).
 diomedes/
 ├── client/            # React SPA (Vite, Mantine UI, TipTap editor)
 ├── server/            # Express API (ESM, no build step)
-├── scripts/release.sh # builds diomedes:<version> + :latest
+├── scripts/release.sh # tags a release; GitHub Actions builds & publishes
 ├── Dockerfile         # multi-stage: build client → install server deps → runtime
-└── docker-compose.yml # diomedes + postgres:16-alpine + redis:7-alpine
+└── docker-compose.example.yml  # diomedes + postgres + redis + watchtower
 ```
+
+Your real `docker-compose.yml` is gitignored — it holds host-specific mount paths
+and belongs on the server, not in this repo.
 
 ## Running
 
 ```bash
-cp .env.example .env   # fill in APP_SECRET + POSTGRES_PASSWORD
-docker compose up -d --build
+cp docker-compose.example.yml docker-compose.yml   # adjust volumes to taste
+cp .env.example .env                               # fill in APP_SECRET + POSTGRES_PASSWORD
+docker compose up -d
 ```
+
+The image is pulled from `ghcr.io/gagewillette/diomedes` — no local build needed.
 
 The app listens on **port 3000**. First visit shows a one-time setup screen that
 creates the owner account and workspace.
 
-Data lives in bind mounts (adjust paths in `docker-compose.yml` to taste):
+The example file uses named volumes; switch them to bind mounts if you want the
+data at fixed paths (this is what the author's server does):
 
 | Path | Purpose |
 |---|---|
@@ -53,14 +60,52 @@ Data lives in bind mounts (adjust paths in `docker-compose.yml` to taste):
 
 ## Versioning & releases
 
-Images are tagged semver from `server/package.json`:
+Pushing to `main` builds and publishes `ghcr.io/gagewillette/diomedes:latest`.
+Tagging cuts a semver release:
 
 ```bash
-./scripts/release.sh        # builds diomedes:1.1.0 and diomedes:latest
+# bump "version" in server/ and client/ package.json, commit, then:
+./scripts/release.sh        # tags v1.1.0 and pushes; Actions does the build
 ```
 
-Then set `DIOMEDES_VERSION` in `.env` and `docker compose up -d`. Compose runs the
-pinned tag, so rolling back is `DIOMEDES_VERSION=<old> docker compose up -d`.
+Published tags: `:latest` (default branch), `:1.1.0`, `:1.1`, `:sha-abc1234`.
+
+## Auto-deployment
+
+`docker-compose.example.yml` includes a **watchtower** container that polls GHCR
+every 5 minutes and restarts the app when the tag it runs points at a new image.
+`--label-enable` means it only touches containers carrying
+
+```yaml
+labels:
+  com.centurylinklabs.watchtower.enable: "true"
+```
+
+so Postgres and Redis — pinned to exact patch versions — are never auto-updated,
+along with any unrelated stacks sharing the host. Schema changes are applied by
+the app's own idempotent `migrate()` on boot, so an unattended restart is safe.
+
+To pin the deployment instead, set `DIOMEDES_VERSION=1.1.0` in `.env`; watchtower
+only ever moves a container to a newer image *under the same tag*, so an explicit
+version effectively disables auto-updates. Rolling back is
+`DIOMEDES_VERSION=<old> docker compose up -d`.
+
+If you make the GHCR package private, run `docker login ghcr.io` on the host with
+a PAT that has `read:packages`, and uncomment the `config.json` mount on the
+watchtower service.
+
+### Recovering a lost Postgres password
+
+Postgres only applies `POSTGRES_PASSWORD` when it initializes an empty data
+directory — on an existing volume the original password still governs. If it's
+lost, reset it against the existing data:
+
+```bash
+docker compose stop diomedes
+docker compose exec db psql -U postgres -c "ALTER USER diomedes PASSWORD 'new-password';"
+# put the same value in .env, then:
+docker compose up -d
+```
 
 ## HTTPS via Cloudflare tunnel
 
@@ -73,7 +118,9 @@ public hostname (e.g. `docs.gageserver.net`) at `HTTP → localhost:3000`, and k
 
 ```bash
 docker compose logs -f diomedes        # app logs
-./scripts/release.sh                   # build a new versioned image
+docker compose logs -f watchtower      # what auto-deploy is doing
+docker compose pull && docker compose up -d   # deploy now, don't wait for the poll
+./scripts/release.sh                   # tag a release; Actions builds it
 docker exec -it diomedes-db psql -U diomedes diomedes   # db shell
 docker exec diomedes-db pg_dump -U diomedes diomedes > backup.sql
 ```

@@ -1,0 +1,87 @@
+# Reference deployment for Diomedes. Copy to docker-compose.yml (gitignored) and
+# adjust the volumes to suit your host, then `cp .env.example .env` and fill it in.
+#
+#   cp docker-compose.example.yml docker-compose.yml
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#
+# The app image is pulled from GHCR — you do not need to build anything locally.
+# Watchtower polls every 5 minutes and restarts the app when a new image is
+# published. Postgres and Redis are pinned to exact patch versions and are left
+# alone by watchtower; upgrade them deliberately.
+
+services:
+  diomedes:
+    image: ghcr.io/gagewillette/diomedes:${DIOMEDES_VERSION:-latest}
+    container_name: diomedes
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379"
+      STORAGE_PATH: /app/data/storage
+    ports:
+      - "3000:3000"
+    volumes:
+      - app-data:/app/data/storage
+    labels:
+      # Opt this container in to watchtower's auto-update.
+      com.centurylinklabs.watchtower.enable: "true"
+
+  db:
+    image: postgres:16.15-alpine
+    container_name: diomedes-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  redis:
+    image: redis:7.4.10-alpine
+    container_name: diomedes-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  # --label-enable means watchtower only touches containers that explicitly opt
+  # in above, so any unrelated stacks on the same host are untouched. Drop this
+  # service if you would rather deploy by hand with `docker compose pull`.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: diomedes-watchtower
+    restart: unless-stopped
+    environment:
+      # watchtower defaults to Docker API 1.25, which modern daemons reject.
+      DOCKER_API_VERSION: "1.41"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Only needed if the image is private — see README.
+      # - ~/.docker/config.json:/config.json:ro
+    command: --interval 300 --label-enable --cleanup
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  app-data:
+  db-data:
+  redis-data:

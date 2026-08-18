@@ -4,3 +4,5 @@ server/data/
 .env
 *.log
 .DS_Store
+docker-compose.yml
+docker-compose.override.yml
