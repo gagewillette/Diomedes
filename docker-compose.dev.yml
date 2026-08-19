@@ -40,3 +40,48 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  # Embedding server for semantic search, started by scripts/dev.sh only when
+  # SEMANTIC_SEARCH_ENABLED=true and no OPENAI_API_KEY is set. Pulls its own
+  # model on first run into ./data/ollama — no host install, nothing to pull by
+  # hand. First start blocks until the download finishes; later starts are
+  # instant. Upgrade the model deliberately:
+  #   docker compose -f docker-compose.dev.yml exec ollama ollama pull <model>
+  ollama:
+    image: ollama/ollama:0.32.14
+    container_name: diomedes-dev-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_KEEP_ALIVE: 60m
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        /bin/ollama serve &
+        pid=$$!
+        until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+        if /bin/ollama show "$$EMBEDDING_MODEL" >/dev/null 2>&1; then
+          echo "ollama: $$EMBEDDING_MODEL already present"
+        else
+          echo "ollama: pulling $$EMBEDDING_MODEL — first run only, a few hundred MB"
+          until /bin/ollama pull "$$EMBEDDING_MODEL"; do
+            echo "ollama: pull failed, retrying in 10s"
+            sleep 10
+          done
+        fi
+        touch /tmp/model-ready
+        wait $$pid
+    healthcheck:
+      # Unhealthy until the model is on disk — `up --wait` in dev.sh therefore
+      # blocks until embeddings can actually be served.
+      test: ["CMD-SHELL", "test -f /tmp/model-ready && ollama list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15m

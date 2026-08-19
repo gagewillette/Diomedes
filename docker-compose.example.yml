@@ -21,6 +21,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      # required:false so the app still starts when the "ollama" profile is off
+      # and the service does not exist. When it is on, the app waits for the
+      # embedding model to finish downloading.
+      ollama:
+        condition: service_healthy
+        required: false
     env_file:
       - .env
     environment:
@@ -67,6 +73,68 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
+  # Embedding server for semantic search. Enabled by the "ollama" compose
+  # profile (see COMPOSE_PROFILES in .env) — with the profile off this service
+  # is not created at all and search stays pure full-text.
+  #
+  # Nothing is installed on the host: the container starts the server, pulls
+  # ${EMBEDDING_MODEL} into the ollama-models volume on first run, and only
+  # reports healthy once that model is on disk. Later starts find the model in
+  # the volume and come up immediately, offline included. The model is pinned
+  # by that volume on purpose — re-embedding the corpus against a different
+  # model is a deliberate act, so upgrade with:
+  #   docker compose exec ollama ollama pull <model>
+  ollama:
+    image: ollama/ollama:0.32.14
+    container_name: diomedes-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      # Keep the model resident between searches; the default 5m means a cold
+      # reload on every quiet stretch.
+      OLLAMA_KEEP_ALIVE: 60m
+    volumes:
+      - ollama-models:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        /bin/ollama serve &
+        pid=$$!
+        until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+        if /bin/ollama show "$$EMBEDDING_MODEL" >/dev/null 2>&1; then
+          echo "ollama: $$EMBEDDING_MODEL already present"
+        else
+          echo "ollama: pulling $$EMBEDDING_MODEL — first run only, a few hundred MB"
+          until /bin/ollama pull "$$EMBEDDING_MODEL"; do
+            echo "ollama: pull failed, retrying in 10s"
+            sleep 10
+          done
+        fi
+        touch /tmp/model-ready
+        wait $$pid
+    healthcheck:
+      # Unhealthy until the model exists, so the app never embeds against a
+      # model that is still downloading — those jobs would land as 'failed'.
+      test: ["CMD-SHELL", "test -f /tmp/model-ready && ollama list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      # Generous: the whole first pull happens inside this window.
+      start_period: 15m
+    # NVIDIA host? Install the container toolkit and uncomment to use the GPU.
+    # CPU is fine for nomic-embed-text — roughly 50ms per chunk.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
   # --label-enable means watchtower only touches containers that explicitly opt
   # in above, so any unrelated stacks on the same host are untouched. Drop this
   # service if you would rather deploy by hand with `docker compose pull`.
@@ -89,3 +157,6 @@ volumes:
   app-data:
   db-data:
   redis-data:
+  # Downloaded embedding models. Survives container replacement, so the pull
+  # happens once for the life of the host.
+  ollama-models:
