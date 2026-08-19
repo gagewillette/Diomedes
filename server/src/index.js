@@ -7,12 +7,14 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { migrate } from './db.js';
 import { initSearch, searchHealth } from './search/index.js';
+import { initEvents } from './lib/events.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import spaceRoutes from './routes/spaces.js';
 import pageRoutes from './routes/pages.js';
 import fileRoutes, { STORAGE_PATH } from './routes/files.js';
 import tokenRoutes from './routes/tokens.js';
+import eventRoutes from './routes/events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -27,6 +29,7 @@ async function main() {
   await redis.connect();
 
   initSearch(redis);
+  initEvents(redis);
 
   const app = express();
   app.disable('x-powered-by');
@@ -55,6 +58,7 @@ async function main() {
   app.use('/api/users', userRoutes);
   app.use('/api/spaces', spaceRoutes);
   app.use('/api/tokens', tokenRoutes);
+  app.use('/api/events', eventRoutes);
   // fileRoutes first: it contains the unauthenticated /public and /files routes,
   // while pageRoutes guards its whole router with requireAuth.
   app.use('/api', fileRoutes);

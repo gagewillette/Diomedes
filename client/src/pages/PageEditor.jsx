@@ -10,7 +10,7 @@ import {
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
-import { api, emitPagesChanged } from '../lib/api.js';
+import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { WIDTH_TO_CONTAINER } from '../lib/prefs.js';
 import { downloadFile } from '../lib/markdown.js';
@@ -20,7 +20,7 @@ import HistoryModal from '../components/HistoryModal.jsx';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
-  const { preferences } = useAuth();
+  const { preferences, user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [title, setTitle] = useState('');
@@ -49,6 +49,20 @@ export default function PageEditor() {
   }, [pageId, navigate, slug, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
+
+  // If my own access to this page's space changes, re-fetch so the editor
+  // reflects the new role (or bounces me out if it was revoked).
+  useEffect(
+    () =>
+      onAppEvent('space-members-changed', (e) => {
+        if (!data) return; // a load is already in flight and will be current
+        const d = e.detail || {};
+        if (d.userId && d.userId !== user?.id) return;
+        if (d.spaceId && d.spaceId !== data.page.space_id) return;
+        setReloadKey((k) => k + 1);
+      }),
+    [data, user?.id]
+  );
 
   const canWrite = data && ['admin', 'writer'].includes(data.myRole);
 

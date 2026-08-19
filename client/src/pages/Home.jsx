@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Container, Title, Text, SimpleGrid, Card, Group, Stack, UnstyledButton, Divider } from '@mantine/core';
 import { IconStar, IconClock, IconFileText } from '@tabler/icons-react';
 import { Link, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { api } from '../lib/api.js';
+import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 
 dayjs.extend(relativeTime);
@@ -29,11 +29,15 @@ export default function Home() {
   const { user, workspaceName } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.get('/api/pages/recent').then((d) => setRecent(d.pages)).catch(() => {});
     api.get('/api/favorites').then((d) => setFavorites(d.pages)).catch(() => {});
     api.get('/api/spaces').then((d) => setSpaces(d.spaces)).catch(() => {});
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+  // Spaces gained or lost through a permission change should appear here too.
+  useEffect(() => onAppEvent('spaces-changed', load), [load]);
 
   const go = (p) => navigate(`/s/${p.space_slug}/p/${p.id}`);
 

@@ -2,9 +2,19 @@ import { Router } from 'express';
 import { q } from '../db.js';
 import { asyncRoute, httpError, slugify } from '../lib/util.js';
 import { requireAuth, requireAdmin, isWorkspaceAdmin, assertSpaceRole, spaceRole } from '../lib/auth.js';
+import { publish, adminAudience, spaceAudience } from '../lib/events.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Push a membership change to everyone who can see the space. `userId` is the
+// member who changed, so clients can tell "my own access moved" (reload the
+// space) from "someone else's did" (just refresh the members list).
+async function announceMembership(spaceId, userId) {
+  const userIds = await spaceAudience(spaceId, [userId]);
+  publish({ type: 'space-members-changed', spaceId, userId, userIds });
+  publish({ type: 'spaces-changed', userIds });
+}
 
 router.get(
   '/',
@@ -48,6 +58,7 @@ router.post(
       rows[0].id,
       req.user.id,
     ]);
+    publish({ type: 'spaces-changed', userIds: await adminAudience([req.user.id]) });
     res.status(201).json({ space: { ...rows[0], my_role: 'admin' } });
   })
 );
@@ -76,6 +87,7 @@ router.patch(
       [name?.trim(), description, icon, req.params.id]
     );
     if (!rows[0]) throw httpError(404, 'Space not found');
+    publish({ type: 'spaces-changed', userIds: await spaceAudience(req.params.id) });
     res.json({ space: rows[0] });
   })
 );
@@ -84,7 +96,9 @@ router.delete(
   '/:id',
   requireAdmin,
   asyncRoute(async (req, res) => {
+    const audience = await spaceAudience(req.params.id); // membership rows go away with the space
     await q('DELETE FROM spaces WHERE id = $1', [req.params.id]);
+    publish({ type: 'spaces-changed', userIds: audience });
     res.json({ ok: true });
   })
 );
@@ -116,6 +130,7 @@ router.post(
        ON CONFLICT (space_id, user_id) DO UPDATE SET role = $3`,
       [req.params.id, userId, role]
     );
+    await announceMembership(req.params.id, userId);
     res.status(201).json({ ok: true });
   })
 );
@@ -131,6 +146,7 @@ router.patch(
       req.params.id,
       req.params.userId,
     ]);
+    await announceMembership(req.params.id, req.params.userId);
     res.json({ ok: true });
   })
 );
@@ -139,7 +155,11 @@ router.delete(
   '/:id/members/:userId',
   asyncRoute(async (req, res) => {
     await assertSpaceRole(req.user, req.params.id, 'admin');
+    // Audience first: the removed user has to be told they lost access.
+    const audience = await spaceAudience(req.params.id, [req.params.userId]);
     await q('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.id, req.params.userId]);
+    publish({ type: 'space-members-changed', spaceId: req.params.id, userId: req.params.userId, userIds: audience });
+    publish({ type: 'spaces-changed', userIds: audience });
     res.json({ ok: true });
   })
 );

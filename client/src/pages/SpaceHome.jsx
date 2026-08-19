@@ -11,14 +11,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
-import { api, emitPagesChanged } from '../lib/api.js';
+import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { markdownToJSON } from '../lib/markdown.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 
 export default function SpaceHome() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [space, setSpace] = useState(null);
   const [pages, setPages] = useState([]);
   const [membersOpen, membersHandlers] = useDisclosure(false);
@@ -39,6 +39,20 @@ export default function SpaceHome() {
   }, [slug, navigate]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live permission changes. A membership event with no spaceId is a broad
+  // "something moved" signal (reconnect or a workspace role change); one naming
+  // another user only matters to the members list, which reloads on its own.
+  useEffect(
+    () =>
+      onAppEvent('space-members-changed', (e) => {
+        const d = e.detail || {};
+        const mine = !d.userId || d.userId === user?.id;
+        if (mine && (!d.spaceId || !space || d.spaceId === space.id)) load();
+      }),
+    [load, space, user?.id]
+  );
+  useEffect(() => onAppEvent('spaces-changed', load), [load]);
 
   if (!space) return <Center h="60vh"><Loader /></Center>;
   const canWrite = ['admin', 'writer'].includes(space.my_role);
@@ -153,6 +167,16 @@ function MembersModal({ space, opened, onClose }) {
   }, [space.id]);
 
   useEffect(() => { if (opened) load(); }, [opened, load]);
+  useEffect(() => {
+    if (!opened) return undefined;
+    const reload = (e) => {
+      const spaceId = e.detail?.spaceId;
+      if (!spaceId || spaceId === space.id) load();
+    };
+    const offMembers = onAppEvent('space-members-changed', reload);
+    const offUsers = onAppEvent('users-changed', reload);
+    return () => { offMembers(); offUsers(); };
+  }, [opened, load, space.id]);
 
   const nonMembers = allUsers.filter((u) => !members.some((m) => m.user_id === u.id));
 
