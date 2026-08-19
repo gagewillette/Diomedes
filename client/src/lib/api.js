@@ -40,6 +40,12 @@ export function emitPagesChanged(spaceId) {
   window.dispatchEvent(new CustomEvent('pages-changed', { detail: { spaceId } }));
 }
 export function onPagesChanged(handler) {
-  window.addEventListener('pages-changed', handler);
-  return () => window.removeEventListener('pages-changed', handler);
+  return onAppEvent('pages-changed', handler);
+}
+
+// Same channel, used by the realtime stream for workspace/permission changes:
+// 'spaces-changed', 'space-members-changed', 'users-changed'.
+export function onAppEvent(name, handler) {
+  window.addEventListener(name, handler);
+  return () => window.removeEventListener(name, handler);
 }

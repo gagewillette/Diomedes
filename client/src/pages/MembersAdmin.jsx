@@ -7,7 +7,7 @@ import { IconPlus, IconDots, IconKey, IconTrash, IconUserOff, IconUserCheck } fr
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
-import { api } from '../lib/api.js';
+import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 
 export default function MembersAdmin() {
@@ -21,6 +21,7 @@ export default function MembersAdmin() {
     setUsers(d.users);
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => onAppEvent('users-changed', load), [load]);
 
   const run = async (fn, successMsg) => {
     try {
