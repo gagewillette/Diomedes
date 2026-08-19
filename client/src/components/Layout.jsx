@@ -162,7 +162,7 @@ export default function Layout({ children }) {
         </AppShell.Section>
       </AppShell.Navbar>
 
-      <AppShell.Main>
+      <AppShell.Main className={navOpen ? undefined : 'gd-nav-collapsed'}>
         {!navOpen && (
           <Burger
             opened={false} onClick={navHandlers.open} size="sm"
