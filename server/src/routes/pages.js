@@ -3,6 +3,7 @@ import { q } from '../db.js';
 import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
+import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -45,6 +46,69 @@ router.get(
   })
 );
 
+// Autocomplete for [[wiki links]] and the parent-page picker. Searches every
+// space the caller can read, but floats the space they are writing in to the
+// top so linking within a space stays a two-keystroke affair.
+router.get(
+  '/pages/link-search',
+  asyncRoute(async (req, res) => {
+    const query = (req.query.q || '').trim();
+    const acc = accessibleSpacesCTE(req.user);
+    const params = [...acc.params];
+    const bind = (value) => `$${params.push(value)}`;
+
+    const conds = [`p.deleted_at IS NULL`, `p.space_id IN (${acc.sql})`];
+    if (query) conds.push(`p.title ILIKE ${bind(`%${query}%`)}`);
+    if (req.query.exclude) conds.push(`p.id <> ${bind(req.query.exclude)}`);
+
+    // A parent page has to live in the same space as its child, so the parent
+    // picker asks for a hard filter where the [[link]] picker only wants the
+    // current space floated to the top.
+    let preferSpace = '';
+    if (req.query.spaceId) {
+      const spaceParam = bind(req.query.spaceId);
+      if (req.query.onlySpace) conds.push(`p.space_id = ${spaceParam}`);
+      else preferSpace = `(p.space_id = ${spaceParam}) DESC, `;
+    }
+
+    const { rows } = await q(
+      `SELECT p.id, p.title, p.icon, p.space_id,
+              s.slug AS space_slug, s.name AS space_name, s.icon AS space_icon
+       FROM pages p JOIN spaces s ON s.id = p.space_id
+       WHERE ${conds.join(' AND ')}
+       ORDER BY ${preferSpace}p.updated_at DESC
+       LIMIT 12`,
+      params
+    );
+    res.json({ pages: rows });
+  })
+);
+
+// Live titles for the page ids embedded in a document's [[links]]. A link
+// stores the title it was written with, but the page it points at may have been
+// renamed since — resolving by id here keeps the rendered chip honest.
+router.get(
+  '/pages/titles',
+  asyncRoute(async (req, res) => {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+      .slice(0, 100);
+    if (!ids.length) return res.json({ pages: [] });
+    const acc = accessibleSpacesCTE(req.user);
+    const { rows } = await q(
+      `SELECT p.id, p.title, p.icon, s.slug AS space_slug
+       FROM pages p JOIN spaces s ON s.id = p.space_id
+       WHERE p.id = ANY($${acc.params.length + 1}::uuid[])
+         AND p.deleted_at IS NULL
+         AND p.space_id IN (${acc.sql})`,
+      [...acc.params, ids]
+    );
+    res.json({ pages: rows });
+  })
+);
+
 // ---- CRUD ----
 
 router.post(
@@ -67,6 +131,7 @@ router.post(
       [spaceId, parentId, title, pos[0].next, req.user.id]
     );
     notePageChanged(rows[0].id, rows[0].updated_at);
+    if (title) await resolveLinksByTitle(rows[0]);
     res.status(201).json({ page: rows[0] });
   })
 );
@@ -128,7 +193,70 @@ router.patch(
       [page.id, req.user.id, newTitle, icon, JSON.stringify(newContent), text]
     );
     notePageChanged(rows[0].id, rows[0].updated_at);
+
+    if (content !== undefined) await syncPageLinks(page.id, newContent, page.space_id);
+    if (title !== undefined && title !== page.title) {
+      // A rename can both attract dangling links and orphan ones that had
+      // adopted the old title.
+      await resolveLinksByTitle({ id: page.id, title: newTitle, space_id: page.space_id });
+      await unresolveStaleTitleLinks({ id: page.id, title: newTitle });
+    }
     res.json({ page: rows[0] });
+  })
+);
+
+// ---- links & backlinks ----
+
+// Pages that point *at* this one. A link whose target sits in the trash simply
+// stops appearing rather than being deleted, so restoring a page restores its
+// backlinks too.
+router.get(
+  '/pages/:id/backlinks',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const acc = accessibleSpacesCTE(req.user);
+    const { rows } = await q(
+      `SELECT DISTINCT p.id, p.title, p.icon, p.space_id, p.updated_at,
+              s.slug AS space_slug, s.name AS space_name
+       FROM page_links l
+       JOIN pages p ON p.id = l.source_id
+       JOIN spaces s ON s.id = p.space_id
+       WHERE l.target_id = $${acc.params.length + 1}
+         AND p.deleted_at IS NULL
+         AND p.id <> $${acc.params.length + 1}
+         AND p.space_id IN (${acc.sql})
+       ORDER BY p.updated_at DESC`,
+      [...acc.params, page.id]
+    );
+    res.json({ backlinks: rows });
+  })
+);
+
+// Pages this one points at, including links that resolve to nothing yet.
+router.get(
+  '/pages/:id/links',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const { rows } = await q(
+      `SELECT l.target_id, l.target_title,
+              t.title, t.icon, t.space_id, s.slug AS space_slug
+       FROM page_links l
+       LEFT JOIN pages t ON t.id = l.target_id AND t.deleted_at IS NULL
+       LEFT JOIN spaces s ON s.id = t.space_id
+       WHERE l.source_id = $1
+       ORDER BY COALESCE(t.title, l.target_title)`,
+      [page.id]
+    );
+    res.json({
+      links: rows.map((r) => ({
+        pageId: r.target_id && r.title !== null ? r.target_id : null,
+        title: r.title ?? r.target_title,
+        icon: r.icon || '',
+        spaceSlug: r.space_slug || null,
+      })),
+    });
   })
 );
 

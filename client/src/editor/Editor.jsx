@@ -38,6 +38,7 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { PageLink, linkContext } from './nodes/PageLink.jsx';
 
 const lowlight = createLowlight(common);
 
@@ -82,11 +83,12 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
       },
     }),
     SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
+    PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
   ];
 }
 
-export default function Editor({ content, editable = true, pageId, onUpdate, onReady }) {
+export default function Editor({ content, editable = true, pageId, space, onUpdate, onReady }) {
   const { preferences } = useAuth();
   const uploadFile = pageId
     ? async (file) => {
@@ -101,6 +103,12 @@ export default function Editor({ content, editable = true, pageId, onUpdate, onR
         }
       }
     : null;
+
+  // The [[link]] suggestion plugin runs outside React, so hand it the current
+  // space through the module-level context before the editor can be typed in.
+  linkContext.spaceId = space?.id ?? null;
+  linkContext.spaceSlug = space?.slug ?? null;
+  linkContext.canWrite = Boolean(editable);
 
   const editor = useEditor({
     extensions: buildExtensions({ uploadFile }),

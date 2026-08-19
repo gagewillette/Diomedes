@@ -5,7 +5,7 @@ import {
 } from '@mantine/core';
 import {
   IconStar, IconStarFilled, IconDots, IconHistory, IconMessageCircle, IconShare,
-  IconTrash, IconDownload, IconPrinter, IconCheck, IconCopy, IconMoodSmile,
+  IconTrash, IconDownload, IconPrinter, IconCheck, IconCopy, IconMoodSmile, IconSitemap,
 } from '@tabler/icons-react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -17,6 +17,8 @@ import { downloadFile } from '../lib/markdown.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import HistoryModal from '../components/HistoryModal.jsx';
+import BacklinksPanel from '../components/BacklinksPanel.jsx';
+import PagePicker from '../components/PagePicker.jsx';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
@@ -28,6 +30,7 @@ export default function PageEditor() {
   const [shareToken, setShareToken] = useState(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
   const saveTimer = useRef(null);
@@ -153,6 +156,21 @@ export default function PageEditor() {
     }
   };
 
+  // Naming a parent is an explicit link, not a nudge: pick any page in the
+  // space and the sidebar tree reflects the new nesting immediately.
+  const setParent = async (parent) => {
+    try {
+      await api.post(`/api/pages/${pageId}/move`, { parentId: parent?.id ?? null });
+      emitPagesChanged(data.page.space_id);
+      setReloadKey((k) => k + 1);
+      notifications.show({
+        message: parent ? `Nested under “${parent.title || 'Untitled'}”` : 'Moved to the top level',
+      });
+    } catch (err) {
+      notifications.show({ color: 'red', message: err.message });
+    }
+  };
+
   const deletePage = async () => {
     if (!window.confirm(`Move "${title || 'Untitled'}" to trash?`)) return;
     await api.del(`/api/pages/${pageId}`);
@@ -234,6 +252,11 @@ export default function PageEditor() {
                   Change icon
                 </Menu.Item>
               )}
+              {canWrite && (
+                <Menu.Item leftSection={<IconSitemap size={14} />} onClick={() => setParentPickerOpen(true)}>
+                  Set parent page
+                </Menu.Item>
+              )}
               <Menu.Item leftSection={<IconHistory size={14} />} onClick={() => setHistoryOpen(true)}>
                 Page history
               </Menu.Item>
@@ -293,11 +316,23 @@ export default function PageEditor() {
           content={data.page.content}
           editable={Boolean(canWrite)}
           pageId={pageId}
+          space={data.space}
           onUpdate={onEditorUpdate}
           onReady={(editor) => { editorRef.current = editor; }}
         />
+        <BacklinksPanel pageId={pageId} spaceId={data.page.space_id} />
       </Container>
 
+      <PagePicker
+        opened={parentPickerOpen}
+        onClose={() => setParentPickerOpen(false)}
+        onPick={setParent}
+        title="Set parent page"
+        spaceId={data.page.space_id}
+        exclude={pageId}
+        rootLabel="No parent (top level)"
+        onlySpace
+      />
       <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <HistoryModal
         pageId={pageId}

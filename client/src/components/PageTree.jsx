@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Group, Text, ActionIcon, Menu, UnstyledButton } from '@mantine/core';
 import {
   IconChevronRight, IconDots, IconPlus, IconTrash, IconArrowUp, IconArrowDown,
-  IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText,
+  IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText, IconSitemap,
 } from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { api, emitPagesChanged, onPagesChanged } from '../lib/api.js';
+import PagePicker from './PagePicker.jsx';
 
 export default function PageTree({ space }) {
   const [pages, setPages] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
+  const [reparenting, setReparenting] = useState(null); // page whose parent is being chosen
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const pathParts = pathname.split('/');
@@ -155,6 +157,12 @@ export default function PageTree({ space }) {
                     Nest under previous
                   </Menu.Item>
                   <Menu.Item
+                    leftSection={<IconSitemap size={14} />}
+                    onClick={() => setReparenting(page)}
+                  >
+                    Set parent page…
+                  </Menu.Item>
+                  <Menu.Item
                     leftSection={<IconIndentDecrease size={14} />} disabled={!page.parent_id}
                     onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, {
                       parentId: byId.get(page.parent_id)?.parent_id || null,
@@ -185,6 +193,20 @@ export default function PageTree({ space }) {
   const roots = childrenOf.get('root') || [];
   return (
     <div className="gd-tree">
+      <PagePicker
+        opened={Boolean(reparenting)}
+        onClose={() => setReparenting(null)}
+        onPick={(parent) => {
+          const child = reparenting;
+          act(() => api.post(`/api/pages/${child.id}/move`, { parentId: parent?.id ?? null }));
+          if (parent) setExpanded((s) => new Set([...s, parent.id]));
+        }}
+        title={`Set parent of “${reparenting?.title || 'Untitled'}”`}
+        spaceId={space.id}
+        exclude={reparenting?.id}
+        rootLabel="No parent (top level)"
+        onlySpace
+      />
       {roots.map((p) => renderNode(p, 0))}
       {canWrite && (
         <UnstyledButton className="gd-tree-add" onClick={() => createPage(null)}>
