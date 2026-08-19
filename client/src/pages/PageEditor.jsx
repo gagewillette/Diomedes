@@ -150,7 +150,7 @@ export default function PageEditor() {
 
   return (
     <div className="gd-page">
-      <Group justify="space-between" px="md" py={8} className="gd-page-topbar" wrap="nowrap">
+      <Group justify="space-between" py={8} className="gd-page-topbar" wrap="nowrap">
         <Breadcrumbs separator="›" styles={{ separator: { opacity: 0.5 } }}>
           <Anchor component={Link} to={`/s/${slug}`} size="sm" c="dimmed">
             {data.space.icon} {data.space.name}

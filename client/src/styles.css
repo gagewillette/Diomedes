@@ -305,7 +305,13 @@
   position: sticky; top: 0; z-index: 100;
   background: var(--mantine-color-body);
   border-bottom: 1px solid var(--mantine-color-default-border);
+  padding-inline: var(--mantine-spacing-md);
+  transition: padding-inline-start 150ms ease;
 }
+/* the expand-sidebar burger is fixed at the top-left of the main area, so
+   reserve room for it instead of letting it sit on top of the breadcrumbs */
+.gd-nav-collapsed .gd-page-topbar { padding-inline-start: 46px; }
+.gd-anim-off .gd-page-topbar { transition: none; }
 
 /* ---------- print ---------- */
 @media print {
