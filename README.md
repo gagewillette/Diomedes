@@ -66,11 +66,38 @@ worked. Turning semantic search on adds vector similarity alongside it, so
 "how do I roll back a release" finds the runbook that only ever says "revert to
 the previous tag".
 
+Embeddings come from a local model by default — no API key, no data leaving the
+host, and nothing to install. `docker-compose.example.yml` ships an `ollama`
+service that downloads its own model on first boot; you turn it on with its
+compose profile:
+
 ```bash
-# .env
+# .env — the defaults in .env.example already match this
 SEMANTIC_SEARCH_ENABLED=true
-OPENAI_API_KEY=sk-...
+COMPOSE_PROFILES=ollama
+EMBEDDING_API_URL=http://ollama:11434/v1/embeddings
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_DIMENSIONS=768
 ```
+
+`docker compose up -d` then pulls the model (~274 MB) into the `ollama-models`
+volume on the first start. The container stays unhealthy until that finishes and
+the app waits on it, so no page is ever embedded against a half-downloaded
+model. Later starts find the model in the volume and come up in seconds, offline
+included. The model is deliberately not auto-updated — swapping it invalidates
+every stored vector — so upgrade by hand when you mean to:
+
+```bash
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
+CPU is enough (~50ms per chunk); there is a commented GPU block in the compose
+file for NVIDIA hosts. To use OpenAI instead, clear `COMPOSE_PROFILES` and the
+three `EMBEDDING_*` values and set `OPENAI_API_KEY=sk-...` — any other
+OpenAI-compatible embedding server works the same way via `EMBEDDING_API_URL`.
+
+`EMBEDDING_DIMENSIONS` must match the model's native width. Changing it means
+rebuilding `page_chunks` (`DROP TABLE page_chunks`, restart, then backfill).
 
 It needs the `pgvector/pgvector:pg16` db image (already the default in
 `docker-compose.example.yml` — a drop-in replacement that reuses an existing
@@ -94,7 +121,14 @@ the queue backlog, and the running embedding spend:
 ```
 
 Leaving `SEMANTIC_SEARCH_ENABLED=false` costs nothing: no embedding calls, no
-background work, no vector tables touched.
+background work, no vector tables touched, and with `COMPOSE_PROFILES` empty the
+ollama container is never created.
+
+In local dev, `SEMANTIC_SEARCH_ENABLED=true` in `.env` is the whole switch:
+`npm run dev` starts the same ollama container, points the server at it on
+`localhost:11434`, and blocks on the first model download. Stop any Ollama you
+installed on the host first — it holds the same port and the container replaces
+it.
 
 ## Versioning & releases
 

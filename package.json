@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "bash scripts/dev.sh",
-    "dev:down": "docker compose -f docker-compose.dev.yml down"
+    "dev:down": "COMPOSE_PROFILES=ollama docker compose -f docker-compose.dev.yml down"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
