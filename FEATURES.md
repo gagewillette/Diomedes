@@ -42,6 +42,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |
+| Semantic / AI search | ✅ Optional (`SEMANTIC_SEARCH_ENABLED`) — pgvector embeddings fused with full-text by reciprocal rank fusion, embedded in the background on save, falls back to full-text if the API is down |
 | Trash / restore pages | ✅ Soft-delete with per-space trash, restore, permanent delete |
 | Favorites / starred pages | ✅ |
 | Recently updated pages | ✅ Home dashboard |

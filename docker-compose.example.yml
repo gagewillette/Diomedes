@@ -36,7 +36,11 @@ services:
       com.centurylinklabs.watchtower.enable: "true"
 
   db:
-    image: postgres:16.15-alpine
+    # pgvector's image is postgres 16 plus the vector extension — a drop-in
+    # replacement that reuses an existing postgres:16 data volume. Required only
+    # if you turn SEMANTIC_SEARCH_ENABLED on; plain postgres:16 also works and
+    # search simply stays full-text.
+    image: pgvector/pgvector:pg16
     container_name: diomedes-db
     restart: unless-stopped
     environment:
