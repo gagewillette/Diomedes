@@ -1,15 +1,17 @@
 import { vectorAvailable } from '../db.js';
 import { initEmbed } from './embed.js';
+import { EMBED_API_URL, EMBED_MODEL } from './config.js';
 import { initStats, recordQuery, searchStats } from './stats.js';
 import { startQueue, enqueuePage, queueDepth } from './queue.js';
 import { ftsSearch } from './fts.js';
 import { hybridSearch } from './hybrid.js';
 
-// Semantic search is off unless it is both switched on and given a key. Off
-// means the pre-existing behaviour exactly: full-text only, no background work,
-// no outbound API calls.
+// Semantic search is off unless it is switched on and given a provider — either
+// an OpenAI key or a local OpenAI-compatible endpoint. Off means the pre-existing
+// behaviour exactly: full-text only, no background work, no outbound calls.
 export const semanticConfigured = () =>
-  process.env.SEMANTIC_SEARCH_ENABLED === 'true' && Boolean(process.env.OPENAI_API_KEY);
+  process.env.SEMANTIC_SEARCH_ENABLED === 'true' &&
+  Boolean(process.env.OPENAI_API_KEY || process.env.EMBEDDING_API_URL);
 
 let active = false;
 export const semanticActive = () => active;
@@ -17,7 +19,10 @@ export const semanticActive = () => active;
 export function initSearch(redis) {
   initStats(redis);
   if (!semanticConfigured()) {
-    console.log('search: full-text mode (set SEMANTIC_SEARCH_ENABLED=true and OPENAI_API_KEY for hybrid)');
+    console.log(
+      'search: full-text mode (set SEMANTIC_SEARCH_ENABLED=true plus OPENAI_API_KEY ' +
+        'or EMBEDDING_API_URL for hybrid)'
+    );
     return;
   }
   if (!vectorAvailable) {
@@ -30,7 +35,7 @@ export function initSearch(redis) {
     active = false;
     console.error('search: embedding worker failed to start, falling back to full-text', err.message);
   });
-  console.log('search: hybrid mode (full-text + pgvector)');
+  console.log(`search: hybrid mode (full-text + pgvector) via ${EMBED_MODEL} @ ${EMBED_API_URL}`);
 }
 
 // Single entry point for the /api/search route. Hybrid search degrades to

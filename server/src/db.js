@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { EMBED_DIMS } from './search/config.js';
 
 const { Pool } = pg;
 
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS page_chunks (
   page_id uuid NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   chunk_index int NOT NULL,
   content text NOT NULL,
-  embedding vector(1536),
+  embedding vector(${EMBED_DIMS}),
   token_count int NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (page_id, chunk_index)

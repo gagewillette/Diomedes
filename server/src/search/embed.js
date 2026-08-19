@@ -1,10 +1,9 @@
 import crypto from 'node:crypto';
 import { recordEmbed } from './stats.js';
+import { EMBED_API_URL, EMBED_DIMS, EMBED_MODEL, SEND_DIMENSIONS } from './config.js';
 
-export const EMBED_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
-export const EMBED_DIMS = 1536;
+export { EMBED_MODEL, EMBED_DIMS };
 
-const API_URL = 'https://api.openai.com/v1/embeddings';
 const MAX_ATTEMPTS = 3;
 const QUERY_CACHE_TTL = 300; // seconds — repeat searches are common and free here
 
@@ -30,13 +29,21 @@ export async function embedBatch(texts, { maxAttempts = MAX_ATTEMPTS } = {}) {
   const started = Date.now();
   for (let attempt = 1; ; attempt++) {
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(EMBED_API_URL, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          // Local OpenAI-compatible servers need no credentials; the header is
+          // only sent when a key is actually configured.
+          ...(process.env.OPENAI_API_KEY
+            ? { authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
+            : {}),
         },
-        body: JSON.stringify({ model: EMBED_MODEL, input: texts, dimensions: EMBED_DIMS }),
+        body: JSON.stringify({
+          model: EMBED_MODEL,
+          input: texts,
+          ...(SEND_DIMENSIONS ? { dimensions: EMBED_DIMS } : {}),
+        }),
         signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {
@@ -47,6 +54,15 @@ export async function embedBatch(texts, { maxAttempts = MAX_ATTEMPTS } = {}) {
       }
       const data = await res.json();
       const vectors = data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+      // Providers that ignore `dimensions` return their native width. Catch that
+      // here rather than letting it surface as an opaque insert failure against
+      // the vector(N) column.
+      if (vectors[0] && vectors[0].length !== EMBED_DIMS) {
+        throw new EmbedError(
+          `embedding model returned ${vectors[0].length} dimensions, expected ${EMBED_DIMS} — ` +
+            `set EMBEDDING_DIMENSIONS=${vectors[0].length} and rebuild page_chunks`
+        );
+      }
       recordEmbed({ tokens: data.usage?.total_tokens || 0, ms: Date.now() - started, ok: true });
       return vectors;
     } catch (err) {

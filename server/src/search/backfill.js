@@ -11,7 +11,9 @@ import { semanticConfigured } from './index.js';
 
 async function main() {
   if (!semanticConfigured()) {
-    console.error('SEMANTIC_SEARCH_ENABLED must be true and OPENAI_API_KEY must be set');
+    console.error(
+      'SEMANTIC_SEARCH_ENABLED must be true, and either OPENAI_API_KEY or EMBEDDING_API_URL must be set'
+    );
     process.exit(1);
   }
   const all = process.argv.includes('--all');

@@ -1,10 +1,9 @@
 import { q } from '../db.js';
+// $ per 1M tokens for the configured model — used only for the rough spend
+// estimate reported by /api/health. Zero when embedding runs locally.
+import { USD_PER_MTOKEN } from './config.js';
 
 const STATS_KEY = 'diomedes:search:stats';
-
-// $ per 1M tokens for text-embedding-3-small — used only for the rough spend
-// estimate reported by /api/health.
-const USD_PER_MTOKEN = 0.02;
 
 let client = null;
 export const initStats = (redis) => {
