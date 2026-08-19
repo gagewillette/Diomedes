@@ -320,3 +320,57 @@
   .mantine-AppShell-main { padding-left: 0 !important; }
   .gd-editor { min-height: 0; }
 }
+
+/* ---------- wiki page links ---------- */
+.gd-slash-item .gd-slash-icon { display: inline; font-size: 15px; line-height: 1; }
+
+.gd-pagelink-wrap { display: inline; }
+.gd-pagelink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0.05em 0.32em;
+  border-radius: 4px;
+  background: var(--mantine-color-blue-light);
+  color: var(--mantine-color-blue-7);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gd-pagelink:hover { background: var(--mantine-color-blue-light-hover); }
+/* A link written against a title that has no page yet — still readable, but
+   visibly waiting to be filled in. */
+.gd-pagelink.is-unresolved {
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  border: 1px dashed var(--mantine-color-default-border);
+  cursor: default;
+}
+.ProseMirror-selectednode .gd-pagelink,
+.gd-pagelink-wrap.ProseMirror-selectednode .gd-pagelink {
+  outline: 2px solid var(--mantine-color-blue-4);
+}
+
+/* ---------- page picker / backlinks rows ---------- */
+.gd-picker-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: var(--mantine-color-text);
+  text-decoration: none;
+}
+.gd-picker-item:hover { background: var(--mantine-color-default-hover); }
+
+.gd-backlinks-head {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  color: var(--mantine-color-text);
+}
+.gd-backlinks-head:hover { color: var(--mantine-color-blue-6); }
+
+@media print {
+  .gd-backlinks { display: none; }
+}
