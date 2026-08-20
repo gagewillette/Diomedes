@@ -10,8 +10,91 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Two pushes to main must not race to bump the version, so publishes are
+# serialised rather than cancelled — every commit still gets its own image.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Bumps the version and pushes the bump commit + tags back to main. Only runs
+  # for pushes to main; a manual `v*` tag push skips straight to the build.
+  #
+  # This lives in the same workflow as the build on purpose: a push made with
+  # GITHUB_TOKEN deliberately does not trigger workflows, so a separate bump
+  # workflow would never kick off the build. Same reason there is no risk of an
+  # infinite loop here.
+  version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      release_version: ${{ steps.bump.outputs.release_version }}
+      release_minor: ${{ steps.tag.outputs.release_minor }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history and tags — the bump range is measured from the most
+          # recent v* tag, not from the previous push.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Work out and apply the bump
+        id: bump
+        run: ./scripts/bump-version.sh --apply
+
+      - name: Commit, tag and push
+        id: tag
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          RELEASE: ${{ steps.bump.outputs.release_version }}
+          SERVER: ${{ steps.bump.outputs.server_version }}
+          CLIENT: ${{ steps.bump.outputs.client_version }}
+          SERVER_BUMPED: ${{ steps.bump.outputs.server_bumped }}
+          CLIENT_BUMPED: ${{ steps.bump.outputs.client_bumped }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json package-lock.json \
+                  server/package.json server/package-lock.json \
+                  client/package.json client/package-lock.json
+          git commit -m "Release ${RELEASE} (server ${SERVER}, client ${CLIENT})"
+
+          # The release tag drives the image version. The component tags exist so
+          # you can point at "the commit where the client became 1.4.0" even
+          # though the two component versions drift apart.
+          tags=("v${RELEASE}")
+          git tag -a "v${RELEASE}" -m "Diomedes ${RELEASE}"
+          if [[ "$SERVER_BUMPED" == "true" ]]; then
+            git tag -a "server-v${SERVER}" -m "server ${SERVER}"
+            tags+=("server-v${SERVER}")
+          fi
+          if [[ "$CLIENT_BUMPED" == "true" ]]; then
+            git tag -a "client-v${CLIENT}" -m "client ${CLIENT}"
+            tags+=("client-v${CLIENT}")
+          fi
+
+          # Commit and tags go up together: if the push is rejected because main
+          # moved, the run fails and the next push redoes the bump from the last
+          # release tag, so nothing is lost.
+          git push origin HEAD:main "${tags[@]}"
+
+          echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+          echo "release_minor=${RELEASE%.*}" >>"$GITHUB_OUTPUT"
+
   build:
+    needs: [version]
+    # Still build for `v*` tag pushes and manual runs, where `version` is skipped.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -20,6 +103,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build the bump commit, not the commit that triggered the run.
+          ref: ${{ needs.version.outputs.sha || github.sha }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -36,8 +122,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The `semver` patterns only fire on tag pushes. An auto-bumped run is
+          # a branch push — its tag is created inside the run, after the event —
+          # so the version tags are added explicitly from the bump output.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.version.outputs.release_version }},enable=${{ needs.version.outputs.bumped == 'true' }}
+            type=raw,value=${{ needs.version.outputs.release_minor }},enable=${{ needs.version.outputs.bumped == 'true' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
