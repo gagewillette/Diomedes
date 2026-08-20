@@ -5,7 +5,7 @@ import {
 import {
   IconChevronRight, IconDots, IconPlus, IconTrash, IconArrowUp, IconArrowDown,
   IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText, IconSitemap,
-  IconFileImport, IconX, IconFileZip,
+  IconFileImport, IconX,
 } from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -15,7 +15,6 @@ import { focusEditor, onFocusFileTree } from '../lib/vimFocus.js';
 import { jumpParent, moveDown, moveUp } from './vimTreeNav.js';
 import PagePicker from './PagePicker.jsx';
 import { markdownToJSON } from '../lib/markdown.js';
-import { exportPageZip } from '../lib/exportZip.js';
 import { dragState, dropIntent, multiDragImage } from '../lib/pageDrag.js';
 import { dragPayload, inTreeOrder, nextSelection, treeOrder, visibleOrder } from './pageSelection.js';
 
@@ -253,18 +252,6 @@ export default function PageTree({ space }) {
       notifications.show({ color: 'red', message: err.message });
     } finally {
       setImporting(false);
-    }
-  };
-
-  // The one row action a reader gets: export is a read. The work — every page
-  // in the subtree, rendered and zipped — happens here in the browser, so say
-  // how much of it there was when the file lands.
-  const exportZip = async (page) => {
-    try {
-      const count = await exportPageZip(page.id);
-      notifications.show({ message: `Exported ${count} page${count === 1 ? '' : 's'}` });
-    } catch (err) {
-      notifications.show({ color: 'red', message: err.message });
     }
   };
 
@@ -593,107 +580,96 @@ export default function PageTree({ space }) {
               <Text size="sm" truncate>{page.title || 'Untitled'}</Text>
             </Group>
           </UnstyledButton>
-          <span className="gd-tree-actions">
-            <Menu withinPortal position="bottom-start" shadow="md">
-              <Menu.Target>
-                <ActionIcon size="xs" variant="subtle" color="gray"><IconDots size={13} /></ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {/* Export is a read, so this one item is here for readers too —
-                    the rest of the menu changes the page and is not. */}
-                <Menu.Item
-                  leftSection={<IconFileZip size={14} />}
-                  onClick={() => exportZip(page)}
-                >
-                  Export as ZIP
-                </Menu.Item>
-                {canWrite && (
-                  <>
-                    <Menu.Divider />
-                    {/* The tree is one level deep, so a subpage takes no children
-                        of its own — neither created nor imported. */}
-                    {canNest && (
-                      <>
-                        <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
-                          New subpage
-                        </Menu.Item>
-                        <Menu.Item leftSection={<IconFileImport size={14} />} onClick={() => pickImportFile(page.id)}>
-                          Import markdown file
-                        </Menu.Item>
-                      </>
-                    )}
+          {canWrite && (
+            <span className="gd-tree-actions">
+              <Menu withinPortal position="bottom-start" shadow="md">
+                <Menu.Target>
+                  <ActionIcon size="xs" variant="subtle" color="gray"><IconDots size={13} /></ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  {/* The tree is one level deep, so a subpage takes no children
+                      of its own — neither created nor imported. */}
+                  {canNest && (
+                    <>
+                      <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
+                        New subpage
+                      </Menu.Item>
+                      <Menu.Item leftSection={<IconFileImport size={14} />} onClick={() => pickImportFile(page.id)}>
+                        Import markdown file
+                      </Menu.Item>
+                    </>
+                  )}
+                  <Menu.Item
+                    leftSection={<IconPencil size={14} />}
+                    onClick={() => {
+                      const title = window.prompt('Rename page', page.title);
+                      if (title !== null) act(() => api.patch(`/api/pages/${page.id}`, { title }));
+                    }}
+                  >
+                    Rename
+                  </Menu.Item>
+                  <Menu.Divider />
+                  {/* Slots, not sort keys: the server places the page among the
+                      siblings it can see, so these agree with a drag that
+                      landed in the same gap a moment earlier. */}
+                  <Menu.Item
+                    leftSection={<IconArrowUp size={14} />} disabled={idx <= 0}
+                    onClick={() => reorder(idx - 1)}
+                  >
+                    Move up
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconArrowDown size={14} />} disabled={idx === siblings.length - 1}
+                    onClick={() => reorder(idx + 1)}
+                  >
+                    Move down
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0 || !canBeNested}
+                    onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, { parentId: siblings[idx - 1].id }))}
+                  >
+                    Nest under previous
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconSitemap size={14} />}
+                    onClick={() => setReparenting(page)}
+                  >
+                    Set parent page…
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconIndentDecrease size={14} />} disabled={!page.parent_id}
+                    onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, {
+                      parentId: byId.get(page.parent_id)?.parent_id || null,
+                    }))}
+                  >
+                    Move out one level
+                  </Menu.Item>
+                  <Menu.Divider />
+                  {/* On a row that is part of a selection, the menu acts on the
+                      selection — trashing just this one out from under a
+                      highlighted group is never what the click meant. */}
+                  {inSelection ? (
                     <Menu.Item
-                      leftSection={<IconPencil size={14} />}
+                      color="red" leftSection={<IconTrash size={14} />}
+                      onClick={() => setConfirmTrash(true)}
+                    >
+                      Move {selected.length} pages to trash
+                    </Menu.Item>
+                  ) : (
+                    <Menu.Item
+                      color="red" leftSection={<IconTrash size={14} />}
                       onClick={() => {
-                        const title = window.prompt('Rename page', page.title);
-                        if (title !== null) act(() => api.patch(`/api/pages/${page.id}`, { title }));
+                        if (page.id === activePageId) navigate(`/s/${space.slug}`);
+                        act(() => api.del(`/api/pages/${page.id}`));
                       }}
                     >
-                      Rename
+                      Move to trash
                     </Menu.Item>
-                    <Menu.Divider />
-                    {/* Slots, not sort keys: the server places the page among the
-                        siblings it can see, so these agree with a drag that
-                        landed in the same gap a moment earlier. */}
-                    <Menu.Item
-                      leftSection={<IconArrowUp size={14} />} disabled={idx <= 0}
-                      onClick={() => reorder(idx - 1)}
-                    >
-                      Move up
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconArrowDown size={14} />} disabled={idx === siblings.length - 1}
-                      onClick={() => reorder(idx + 1)}
-                    >
-                      Move down
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0 || !canBeNested}
-                      onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, { parentId: siblings[idx - 1].id }))}
-                    >
-                      Nest under previous
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconSitemap size={14} />}
-                      onClick={() => setReparenting(page)}
-                    >
-                      Set parent page…
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconIndentDecrease size={14} />} disabled={!page.parent_id}
-                      onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, {
-                        parentId: byId.get(page.parent_id)?.parent_id || null,
-                      }))}
-                    >
-                      Move out one level
-                    </Menu.Item>
-                    <Menu.Divider />
-                    {/* On a row that is part of a selection, the menu acts on the
-                        selection — trashing just this one out from under a
-                        highlighted group is never what the click meant. */}
-                    {inSelection ? (
-                      <Menu.Item
-                        color="red" leftSection={<IconTrash size={14} />}
-                        onClick={() => setConfirmTrash(true)}
-                      >
-                        Move {selected.length} pages to trash
-                      </Menu.Item>
-                    ) : (
-                      <Menu.Item
-                        color="red" leftSection={<IconTrash size={14} />}
-                        onClick={() => {
-                          if (page.id === activePageId) navigate(`/s/${space.slug}`);
-                          act(() => api.del(`/api/pages/${page.id}`));
-                        }}
-                      >
-                        Move to trash
-                      </Menu.Item>
-                    )}
-                  </>
-                )}
-              </Menu.Dropdown>
-            </Menu>
-          </span>
+                  )}
+                </Menu.Dropdown>
+              </Menu>
+            </span>
+          )}
         </Group>
         {isOpen && kids.map((k) => renderNode(k, depth + 1))}
       </div>

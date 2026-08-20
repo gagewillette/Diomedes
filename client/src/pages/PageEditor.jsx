@@ -6,7 +6,6 @@ import {
 import {
   IconStar, IconStarFilled, IconDots, IconHistory, IconMessageCircle, IconShare,
   IconTrash, IconDownload, IconPrinter, IconCheck, IconCopy, IconMoodSmile, IconSitemap,
-  IconFileZip,
 } from '@tabler/icons-react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -15,7 +14,6 @@ import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { WIDTH_TO_CONTAINER } from '../lib/prefs.js';
 import { downloadFile } from '../lib/markdown.js';
-import { exportPageZip } from '../lib/exportZip.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import HistoryModal from '../components/HistoryModal.jsx';
@@ -223,18 +221,6 @@ export default function PageEditor() {
     }
   };
 
-  // The page plus everything nested under it, as one flat archive of markdown
-  // files. Unlike the two exports above this cannot come off the open editor —
-  // the descendants are not loaded here — so it fetches the subtree itself.
-  const exportZip = async () => {
-    try {
-      const count = await exportPageZip(pageId);
-      notifications.show({ message: `Exported ${count} page${count === 1 ? '' : 's'}` });
-    } catch (err) {
-      notifications.show({ color: 'red', message: err.message });
-    }
-  };
-
   // Naming a parent is an explicit link, not a nudge: pick any page in the
   // space and the sidebar tree reflects the new nesting immediately.
   const setParent = async (parent) => {
@@ -346,9 +332,6 @@ export default function PageEditor() {
               </Menu.Item>
               <Menu.Item leftSection={<IconDownload size={14} />} onClick={() => exportAs('html')}>
                 Export as HTML
-              </Menu.Item>
-              <Menu.Item leftSection={<IconFileZip size={14} />} onClick={exportZip}>
-                Export as ZIP (with subpages)
               </Menu.Item>
               <Menu.Item leftSection={<IconPrinter size={14} />} onClick={() => window.print()}>
                 Print / PDF
