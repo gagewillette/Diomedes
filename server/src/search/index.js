@@ -57,11 +57,20 @@ export async function searchPages({ user, query, space, limit = 25 }) {
   return results;
 }
 
-// Called from the page write path; never throws and never blocks the response.
-export function notePageChanged(pageId, updatedAt) {
+/**
+ * Called from the page write path; never throws and never blocks the response.
+ *
+ * `blockIds` is the set of blocks that write actually changed, which is what
+ * turns a re-embed of the whole page into a re-embed of one or two chunks. An
+ * empty array means "nothing in the body changed" — a rename, say — and there
+ * is no embedding work to do at all. Omitting the argument entirely means
+ * "unknown", and the worker rebuilds the page from scratch as it always did.
+ */
+export function notePageChanged(pageId, updatedAt, blockIds) {
   if (!active || !pageId) return;
+  if (Array.isArray(blockIds) && blockIds.length === 0) return;
   try {
-    enqueuePage(pageId, updatedAt);
+    enqueuePage(pageId, updatedAt, blockIds ?? null);
   } catch (err) {
     console.error('failed to queue page for embedding', err.message);
   }

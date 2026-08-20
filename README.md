@@ -17,6 +17,12 @@ their user id, so the same person is the same colour for everyone. See
 [docs/realtime-collaboration.md](docs/realtime-collaboration.md) for the design and
 the concurrency reasoning behind it.
 
+**Block storage**: every block in a document carries a stable id, and a projection
+of those blocks is derived from the page inside the same transaction that stores
+it. A save that changes one paragraph re-embeds one chunk instead of the whole
+page, and `GET /api/pages/:id/delta?since=` answers "what changed" without
+shipping the document. See [docs/block-storage.md](docs/block-storage.md).
+
 **Organization**: spaces with nested page trees, full-text search (optionally
 **semantic** — see below), favorites, page
 history with restore, threaded comments, trash, public share links, Markdown

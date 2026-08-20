@@ -9,6 +9,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
+import { BlockId } from '../editor/blockId.js';
 
 // Parse a markdown string into TipTap JSON using a throwaway headless editor.
 export function markdownToJSON(md) {
@@ -21,6 +22,10 @@ export function markdownToJSON(md) {
       Table, TableRow, TableCell, TableHeader,
       TaskList, TaskItem,
       Markdown.configure({ html: false }),
+      // Imported markdown becomes real blocks the moment it lands, rather than
+      // waiting for someone to open the page and edit it. Without this the MCP
+      // import path would write a document with no addressable blocks in it.
+      BlockId,
     ],
     content: md,
   });

@@ -11,12 +11,24 @@ export const estimateTokens = (text) => Math.ceil((text || '').trim().length / 4
 
 // Flatten a TipTap doc into top-level blocks, tagging headings so chunks can
 // break on section boundaries and inherit their heading trail.
+//
+// Each block carries the stable id the editor stamped on it. That id is what
+// makes incremental re-embedding possible: a chunk records which blocks it was
+// built from, so a save can re-embed only the chunks that intersect the blocks
+// it changed. Blocks with no id (a document written before this migration, or
+// one built by a client that does not stamp) simply contribute nothing to that
+// set, and the chunk they land in is treated as un-attributable — see
+// chunksForBlocks in queue.js.
 export function docBlocks(doc) {
   const blocks = [];
   for (const node of Array.isArray(doc?.content) ? doc.content : []) {
     const text = extractText(node).trim();
     if (!text) continue;
-    blocks.push({ text, level: node.type === 'heading' ? node.attrs?.level || 1 : 0 });
+    blocks.push({
+      text,
+      level: node.type === 'heading' ? node.attrs?.level || 1 : 0,
+      blockId: node.attrs?.blockId || null,
+    });
   }
   return blocks;
 }
@@ -74,15 +86,35 @@ export function chunkPage({ title = '', content } = {}) {
 
   const header = () => [title.trim(), ...trail.filter(Boolean)].filter(Boolean).join(' > ');
 
+  // Which blocks fed the chunk being built, and which fed the heading trail it
+  // sits under. A heading contributes its text to every chunk in its section
+  // via the prefix, so editing a heading has to re-embed that whole section —
+  // recording it as a source is what makes that happen automatically instead
+  // of being a special case somebody has to remember.
+  let sources = new Set();
+  let trailSources = [];
+  // The overlap tail carries text from the previous chunk into this one, so the
+  // block that text came from is a source of both.
+  let carried = [];
+
   const flush = ({ overlap }) => {
     if (!body.length) return;
     const text = body.join('\n\n');
     const prefix = header();
     const full = prefix ? `${prefix}\n\n${text}` : text;
-    chunks.push({ index: chunks.length, content: full, tokenCount: estimateTokens(full) });
+    const blockIds = [...new Set([...trailSources.filter(Boolean), ...sources])];
+    chunks.push({
+      index: chunks.length,
+      content: full,
+      tokenCount: estimateTokens(full),
+      blockIds,
+    });
     const carry = overlap ? tailTokens(text, OVERLAP_TOKENS) : '';
     body = carry ? [carry] : [];
     bodyTokens = carry ? estimateTokens(carry) : 0;
+    // Only the block the carried text came from survives into the next chunk.
+    sources = new Set(carry ? carried : []);
+    carried = [];
   };
 
   for (const block of blocks) {
@@ -91,13 +123,19 @@ export function chunkPage({ title = '', content } = {}) {
       flush({ overlap: false });
       trail = trail.slice(0, block.level - 1);
       trail[block.level - 1] = block.text;
+      trailSources = trailSources.slice(0, block.level - 1);
+      trailSources[block.level - 1] = block.blockId;
       continue;
     }
     for (const piece of splitOversized(block.text)) {
       const tokens = estimateTokens(piece);
-      if (bodyTokens && bodyTokens + tokens > MAX_CHUNK_TOKENS) flush({ overlap: true });
+      if (bodyTokens && bodyTokens + tokens > MAX_CHUNK_TOKENS) {
+        carried = block.blockId ? [block.blockId] : [];
+        flush({ overlap: true });
+      }
       body.push(piece);
       bodyTokens += tokens;
+      if (block.blockId) sources.add(block.blockId);
     }
   }
   flush({ overlap: false });
@@ -105,7 +143,14 @@ export function chunkPage({ title = '', content } = {}) {
   // Heading-only or empty pages still deserve one chunk so the title is findable.
   if (!chunks.length) {
     const text = [title.trim(), ...blocks.map((b) => b.text)].filter(Boolean).join('\n\n');
-    if (text) chunks.push({ index: 0, content: text, tokenCount: estimateTokens(text) });
+    if (text) {
+      chunks.push({
+        index: 0,
+        content: text,
+        tokenCount: estimateTokens(text),
+        blockIds: [...new Set(blocks.map((b) => b.blockId).filter(Boolean))],
+      });
+    }
   }
   return chunks;
 }

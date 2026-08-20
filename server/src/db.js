@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { EMBED_DIMS } from './search/config.js';
+import { generateNKeysBetween } from './lib/orderKey.js';
 
 const { Pool } = pg;
 
@@ -52,7 +53,21 @@ CREATE TABLE IF NOT EXISTS pages (
   icon text NOT NULL DEFAULT '',
   content jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}',
   text_content text NOT NULL DEFAULT '',
-  position double precision NOT NULL DEFAULT 0,
+  -- Where this page sits among its siblings. A base-62 fractional index, not
+  -- the double precision it replaces: a double's 52-bit mantissa runs out of
+  -- midpoints after ~50 drops into the same gap and the next one silently
+  -- lands on top of its neighbour. See server/src/lib/orderKey.js.
+  --
+  -- COLLATE "C" is load-bearing, not decoration. The encoding depends on
+  -- comparisons matching ASCII order; a default en_US.UTF-8 collation sorts
+  -- case-insensitively, putting 'a' between 'A' and 'B', which scrambles the
+  -- ordering with no error anywhere.
+  order_key text COLLATE "C" NOT NULL DEFAULT 'a0',
+  -- Monotonic revision, bumped once per write to the body. The handle every
+  -- incremental consumer needs: ?since=rev for the cache, and a per-block
+  -- copy in page_blocks so a save that changed one paragraph leaves the other
+  -- thirty-nine rows at the revision they were last genuinely edited at.
+  rev bigint NOT NULL DEFAULT 0,
   created_by uuid REFERENCES users(id) ON DELETE SET NULL,
   updated_by uuid REFERENCES users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -65,6 +80,51 @@ CREATE INDEX IF NOT EXISTS pages_space_idx ON pages (space_id) WHERE deleted_at 
 CREATE INDEX IF NOT EXISTS pages_parent_idx ON pages (parent_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS pages_tsv_idx ON pages USING gin (tsv);
 CREATE INDEX IF NOT EXISTS pages_updated_idx ON pages (updated_at DESC) WHERE deleted_at IS NULL;
+-- pages_sibling_order_idx is created in migrate(), not here. On an existing
+-- deployment this block runs before the ALTER that adds order_key, and
+-- CREATE INDEX IF NOT EXISTS still fails on a column that does not exist yet.
+
+-- One row per top-level block of a page, projected from pages.content inside
+-- the same transaction that stores it. See server/src/lib/blocks.js for why
+-- this is a projection rather than the source of truth (short version: since
+-- realtime collaboration landed, the Yjs CRDT is the source of truth for an
+-- open page, and a second last-write-wins writer competing with it would be a
+-- regression).
+CREATE TABLE IF NOT EXISTS page_blocks (
+  page_id      uuid NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  block_id     text NOT NULL,
+  type         text NOT NULL,
+  content      jsonb NOT NULL,
+  text_content text NOT NULL DEFAULT '',
+  order_key    text COLLATE "C" NOT NULL,   -- see the note on pages.order_key
+  hash         text NOT NULL,               -- of the canonicalised block JSON
+  rev          bigint NOT NULL,             -- page rev at the last change to THIS block
+  updated_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (page_id, block_id)
+);
+CREATE INDEX IF NOT EXISTS page_blocks_order_idx ON page_blocks (page_id, order_key);
+-- Serves the delta endpoint: "every block of this page above revision N".
+CREATE INDEX IF NOT EXISTS page_blocks_rev_idx ON page_blocks (page_id, rev);
+
+-- Tombstones for blocks that have been deleted.
+--
+-- A cache holding revision N cannot learn about a deletion from page_blocks,
+-- because the evidence is the absence of a row — and absence is not something
+-- a WHERE rev > N query can return. Without this, a client that missed the
+-- write would keep rendering a block nobody else can see, and the only repair
+-- would be refetching whole documents, which is the cost the delta exists to
+-- avoid. Rows are garbage-collected once no cache could still be that far
+-- behind; see BLOCK_TOMBSTONE_TTL_DAYS in routes/pages.js.
+CREATE TABLE IF NOT EXISTS page_block_tombstones (
+  page_id    uuid NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  block_id   text NOT NULL,
+  rev        bigint NOT NULL,
+  deleted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (page_id, block_id)
+);
+CREATE INDEX IF NOT EXISTS page_block_tombstones_rev_idx ON page_block_tombstones (page_id, rev);
+CREATE INDEX IF NOT EXISTS page_block_tombstones_gc_idx ON page_block_tombstones (deleted_at);
 
 CREATE TABLE IF NOT EXISTS page_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -158,16 +218,74 @@ CREATE TABLE IF NOT EXISTS page_chunks (
   content text NOT NULL,
   embedding vector(${EMBED_DIMS}),
   token_count int NOT NULL DEFAULT 0,
+  -- Which blocks this chunk was built from. The chunker deliberately does not
+  -- emit one chunk per block — it packs blocks up to MAX_CHUNK_TOKENS and
+  -- carries OVERLAP_TOKENS across boundaries, which is good retrieval design
+  -- worth keeping — so a chunk spans several blocks and neighbours share text.
+  -- Recording the set is what lets a save re-embed only the chunks that
+  -- intersect the blocks it changed, instead of deleting and rebuilding all of
+  -- them. A one-word edit on a 40-chunk page goes from 40 embedding calls to
+  -- one or two.
+  source_block_ids text[] NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (page_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS page_chunks_page_idx ON page_chunks (page_id);
+-- page_chunks_blocks_idx is created in migrate() for the same reason as
+-- pages_sibling_order_idx: on an existing database the column it indexes does
+-- not exist until the ALTER below has run.
 CREATE INDEX IF NOT EXISTS page_chunks_embedding_idx ON page_chunks USING hnsw (embedding vector_cosine_ops);
 `;
 
 // Set by migrate(); semantic search stays off when the extension is missing so
 // a plain postgres:16 image keeps working.
 export let vectorAvailable = false;
+
+/**
+ * Move an existing page tree off `position double precision` onto `order_key`.
+ *
+ * The migration plan recommends wiping the document store instead of writing a
+ * backfill, and that is the right call for this deployment. This one exists
+ * anyway, and it is fifteen lines rather than the risky content-rewriting
+ * backfill the plan was warning about: Diomedes is self-hosted by other people,
+ * and for them the alternative is every page in every space collapsing to the
+ * same default key — a tree that silently loses its order with no error to
+ * explain it.
+ *
+ * It runs once. `position` is dropped afterwards, so the presence of the column
+ * is itself the "not yet migrated" flag and a restarted server cannot run it a
+ * second time and renumber a tree people have since rearranged.
+ */
+async function migrateTreeOrder() {
+  const { rows: hasPosition } = await q(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'pages' AND column_name = 'position'`
+  );
+  if (!hasPosition.length) return;
+
+  const { rows } = await q(
+    `SELECT id, space_id, parent_id FROM pages
+     ORDER BY space_id, parent_id NULLS FIRST, position, created_at`
+  );
+  if (rows.length) {
+    // Sibling lists are numbered independently: an order key only ever has to
+    // sort correctly against the pages it shares a parent with.
+    const groups = new Map();
+    for (const row of rows) {
+      const key = `${row.space_id}:${row.parent_id ?? ''}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row.id);
+    }
+    for (const ids of groups.values()) {
+      const keys = generateNKeysBetween(null, null, ids.length);
+      for (let i = 0; i < ids.length; i++) {
+        await q('UPDATE pages SET order_key = $1 WHERE id = $2', [keys[i], ids[i]]);
+      }
+    }
+    console.log(`migrated ${rows.length} pages from float positions to order keys`);
+  }
+  await q('ALTER TABLE pages DROP COLUMN IF EXISTS position');
+}
 
 export async function migrate() {
   // Wait for postgres to accept connections (fresh compose stacks race the db).
@@ -201,6 +319,18 @@ export async function migrate() {
     `ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding_status text NOT NULL DEFAULT 'disabled'
      CHECK (embedding_status IN ('pending','processing','ready','failed','disabled'))`
   );
+  // Block storage. Additive for existing deployments; a fresh database gets
+  // these from SCHEMA above and the ALTERs are no-ops.
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS rev bigint NOT NULL DEFAULT 0`);
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS order_key text COLLATE "C" NOT NULL DEFAULT 'a0'`);
+  await migrateTreeOrder();
+  // Only now that order_key is guaranteed to exist. The tree is read as
+  // "children of this parent, in order", which is exactly this index; the
+  // sibling list a drag measures against comes from it too.
+  await q(
+    `CREATE INDEX IF NOT EXISTS pages_sibling_order_idx ON pages (space_id, parent_id, order_key)
+     WHERE deleted_at IS NULL`
+  );
   try {
     await q('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await q('CREATE INDEX IF NOT EXISTS pages_title_trgm_idx ON pages USING gin (title gin_trgm_ops)');
@@ -210,6 +340,8 @@ export async function migrate() {
   try {
     await q('CREATE EXTENSION IF NOT EXISTS vector');
     await q(VECTOR_SCHEMA);
+    await q(`ALTER TABLE page_chunks ADD COLUMN IF NOT EXISTS source_block_ids text[] NOT NULL DEFAULT '{}'`);
+    await q('CREATE INDEX IF NOT EXISTS page_chunks_blocks_idx ON page_chunks USING gin (source_block_ids)');
     vectorAvailable = true;
   } catch (err) {
     console.log('pgvector unavailable, semantic search cannot be enabled:', err.message);
