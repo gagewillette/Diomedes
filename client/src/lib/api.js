@@ -40,6 +40,23 @@ export function emitPagesChanged(spaceId) {
   window.dispatchEvent(new CustomEvent('pages-changed', { detail: { spaceId } }));
 }
 export function onPagesChanged(handler) {
-  window.addEventListener('pages-changed', handler);
-  return () => window.removeEventListener('pages-changed', handler);
+  return onAppEvent('pages-changed', handler);
+}
+
+// Same channel, used by the realtime stream for workspace/permission changes:
+// 'spaces-changed', 'space-members-changed', 'users-changed'.
+export function onAppEvent(name, handler) {
+  window.addEventListener(name, handler);
+  return () => window.removeEventListener(name, handler);
+}
+
+// Wiki links live inside the editor, which also renders on public share pages
+// outside the router. They ask for navigation through this channel instead of
+// reaching for `useNavigate`, and whoever is inside the router answers.
+export function emitNavigate(to) {
+  window.dispatchEvent(new CustomEvent('gd-navigate', { detail: { to } }));
+}
+export function onNavigate(handler) {
+  window.addEventListener('gd-navigate', handler);
+  return () => window.removeEventListener('gd-navigate', handler);
 }

@@ -22,7 +22,7 @@ import Mathematics from '@tiptap/extension-mathematics';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -39,15 +39,38 @@ import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { FindInPage } from './FindInPage.js';
+import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
+import { useDocumentUpload } from './useDocumentUpload.jsx';
+import { useFileDrop } from './useFileDrop.js';
+import { PageLink, linkContext } from './nodes/PageLink.jsx';
+import { VimMode } from './vim/VimMode.js';
+import VimStatus from './vim/VimStatus.jsx';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import { buildCaret, buildSelection } from './collab/carets.js';
+import PointerLayer from './collab/PointerLayer.jsx';
+import { usePresence } from './collab/presence.js';
+import { ReadOnlySelection } from './collab/readonlySelection.js';
+import { useContentSnapshot, useSeedContent } from './collab/persistence.js';
 
 const lowlight = createLowlight(common);
 
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, placeholder = "Type '/' for commands…" }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false }) {
   return [
-    StarterKit.configure({ codeBlock: false, heading: { levels: [1, 2, 3, 4] } }),
+    // First in the list, and at a higher priority than everything else: in
+    // normal mode the keys must not reach the ordinary editing keymap.
+    ...(vim ? [VimMode] : []),
+    StarterKit.configure({
+      codeBlock: false,
+      heading: { levels: [1, 2, 3, 4] },
+      // Yjs keeps its own per-user undo stack. Leaving ProseMirror's history
+      // plugin in place would let one person's undo revert someone else's
+      // paragraph, because it only knows about the local document.
+      ...(collab ? { history: false } : {}),
+    }),
     CodeBlockLowlight.configure({ lowlight }),
     Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
     Image.configure({ allowBase64: true }),
@@ -82,16 +105,79 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
         render: makeSuggestionRender(MentionList),
       },
     }),
-    SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
+    SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
+    PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
     FindInPage,
+    ...(collab
+      ? [
+          Collaboration.configure({ document: collab.ydoc, field: 'default' }),
+          CollaborationCursor.configure({
+            provider: collab.provider,
+            user: me,
+            render: buildCaret,
+            selectionRender: buildSelection,
+          }),
+          // Readers get their highlights broadcast too — see the module comment.
+          ReadOnlySelection.configure({ provider: collab.provider }),
+        ]
+      : []),
+    DocumentBlock,
   ];
 }
 
-export default function Editor({ content, editable = true, pageId, onUpdate, onReady }) {
-  const { preferences } = useAuth();
+/**
+ * Said once per attempt, wherever a file tries to get in while the workspace has
+ * uploads switched off. Deliberately names the setting: the person who hit it is
+ * usually not the admin who turned it off.
+ */
+function notifyUploadsOff() {
+  notifications.show({
+    color: 'yellow',
+    message: 'File uploads are turned off for this workspace (Workspace settings → Data savings).',
+  });
+}
+
+/** documentBlock attrs from a POST /pages/:id/documents response. */
+export const documentAttrs = (res) => ({
+  attachmentId: res.attachment.id,
+  url: res.url,
+  filename: res.attachment.filename,
+  mime: res.attachment.mime,
+  size: res.attachment.size,
+  kind: res.docKind,
+});
+
+export default function Editor({
+  content,
+  editable = true,
+  pageId,
+  space,
+  onUpdate,
+  onReady,
+  collab = null,
+  me = null,
+  onSaveState,
+}) {
+  const { preferences, dataSavings } = useAuth();
+  const wrapRef = useRef(null);
+  // Modal editing is for people writing the page; a reader gets the plain view.
+  const vimEnabled = editable && preferences.keymap === 'vim';
+  // Workspace data savings: with uploads off, no new file gets in — no slash
+  // command, no drop, no paste. Files already in the document keep rendering.
+  const uploadsAllowed = dataSavings.fileUploads;
+  // Slash items live inside extensions, which the editor holds on to; the ref
+  // means a toggle takes effect immediately even if the list is still the one
+  // built before uploads were switched off.
+  const uploadsAllowedRef = useRef(uploadsAllowed);
+  uploadsAllowedRef.current = uploadsAllowed;
+
   const uploadFile = pageId
     ? async (file) => {
+        if (!uploadsAllowedRef.current) {
+          notifyUploadsOff();
+          return null;
+        }
         try {
           const fd = new FormData();
           fd.append('file', file);
@@ -104,37 +190,63 @@ export default function Editor({ content, editable = true, pageId, onUpdate, onR
       }
     : null;
 
+  const { uploadDocument, prompt: documentPrompt } = useDocumentUpload(
+    editable && uploadsAllowed ? pageId : null
+  );
+  // The editor's extensions are built once, so reach the current callback
+  // through a ref rather than baking in the one from the first render.
+  const uploadDocumentRef = useRef(uploadDocument);
+  uploadDocumentRef.current = uploadDocument;
+  const uploadDocumentStable = useCallback((file) => {
+    if (!uploadsAllowedRef.current) {
+      notifyUploadsOff();
+      return null;
+    }
+    return uploadDocumentRef.current?.(file) ?? null;
+  }, []);
+
+  // The [[link]] suggestion plugin runs outside React, so hand it the current
+  // space through the module-level context before the editor can be typed in.
+  linkContext.spaceId = space?.id ?? null;
+  linkContext.spaceSlug = space?.slug ?? null;
+  linkContext.canWrite = Boolean(editable);
+
+  // The extension list is built once per session: TipTap binds Collaboration to
+  // a specific Y.Doc at creation time, and rebuilding it would drop the binding.
+  const extensions = useMemo(
+    () =>
+      buildExtensions({
+        uploadFile,
+        uploadDocument: pageId && editable && uploadsAllowed ? uploadDocumentStable : null,
+        collab,
+        me,
+        vim: vimEnabled,
+      }),
+    // ydoc/provider identity, not the session object: the session re-wraps on
+    // every connection-status change and rebuilding the list would be pointless.
+    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadsAllowed, uploadDocumentStable, vimEnabled] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const editor = useEditor({
-    extensions: buildExtensions({ uploadFile }),
-    content,
+    extensions,
+    // With collaboration on, the document comes from the CRDT. Passing initial
+    // content here as well would insert it on top of whatever synced in.
+    content: collab ? undefined : content,
     editable,
     onUpdate: ({ editor: e }) => onUpdate?.(e),
     editorProps: {
       attributes: { class: 'gd-editor' },
-      handleDrop: (view, event, _slice, moved) => {
-        if (moved || !uploadFile || !event.dataTransfer?.files?.length) return false;
-        event.preventDefault();
-        const files = Array.from(event.dataTransfer.files);
-        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url, coords?.pos);
-          }
-        })();
-        return true;
-      },
-      handlePaste: (view, event) => {
-        if (!uploadFile || !event.clipboardData?.files?.length) return false;
-        const files = Array.from(event.clipboardData.files);
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url);
-          }
-        })();
+      // Drops are handled by useFileDrop on the wrapper, not here — see the
+      // comment there for why ProseMirror's own drop path can't be trusted
+      // with files.
+      handlePaste: (_view, event) => {
+        if (!event.clipboardData?.files?.length) return false;
+        if (!uploadsAllowed) {
+          notifyUploadsOff();
+          return true;
+        }
+        if (!uploadFile) return false;
+        handleFiles(Array.from(event.clipboardData.files));
         return true;
       },
     },
@@ -152,6 +264,40 @@ export default function Editor({ content, editable = true, pageId, onUpdate, onR
     api.get('/api/users', { noRedirect: true }).then((d) => { userCache = d.users; }).catch(() => {});
   }, []);
 
+  // Dropped/pasted files, one at a time so a PPTX can stop and ask how it
+  // should be stored. `pos` is the drop point; each insertion moves it along so
+  // a multi-file drop keeps its order.
+  async function handleFiles(files, pos) {
+    const view = editor?.view;
+    if (!view) return;
+    let at = pos;
+    for (const file of files) {
+      // A PDF or PPTX becomes a document card — the same one /document makes.
+      if (docKindFor(file)) {
+        const res = await uploadDocumentStable(file);
+        if (!res) continue;
+        at = insertDocument(at, res);
+      } else if (uploadFile) {
+        const url = await uploadFile(file);
+        if (!url) continue;
+        at = insertUploaded(view, file, url, at);
+      }
+    }
+  }
+
+  // The bar is a block node and always sits on its own line. Returns the
+  // position just after it, for the next file in the batch.
+  function insertDocument(pos, res) {
+    const at = Math.min(pos ?? editor.state.selection.from, editor.state.doc.content.size);
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(at, { type: 'documentBlock', attrs: documentAttrs(res) })
+      .run();
+    return editor.state.selection.to;
+  }
+
+  // Returns the position just after the insertion, for the next file.
   function insertUploaded(view, file, url, pos) {
     const { schema } = view.state;
     let node;
@@ -163,16 +309,51 @@ export default function Editor({ content, editable = true, pageId, onUpdate, onR
       node = para;
     }
     const tr = view.state.tr;
-    if (pos != null) tr.insert(pos, node);
-    else tr.replaceSelectionWith(node);
+    let end;
+    if (pos != null) {
+      const at = Math.min(pos, view.state.doc.content.size);
+      tr.insert(at, node);
+      end = at + node.nodeSize;
+    } else {
+      tr.replaceSelectionWith(node);
+      end = tr.selection.to;
+    }
     view.dispatch(tr);
+    return end;
   }
 
-  const smoothCaret = editable && preferences.smoothCaret;
+  const livePointers = dataSavings.livePointers;
+  const peers = usePresence({
+    session: collab,
+    editor,
+    me,
+    wrapRef,
+    canWrite: editable,
+    pointers: livePointers,
+  });
+  useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
+  useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
+
+  // The smooth caret hides the real one and draws a line in its place, which
+  // would sit alongside normal mode's block cursor. Vim wins.
+  const smoothCaret = editable && preferences.smoothCaret && !vimEnabled;
+
+  const { ref: dropRef, isOver } = useFileDrop({
+    editor,
+    enabled: Boolean(editor && editable && pageId && uploadsAllowed),
+    onFiles: handleFiles,
+    onBlocked: () => {
+      if (editable && pageId && !uploadsAllowed) notifyUploadsOff();
+    },
+  });
 
   return (
     <div
-      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''}`}
+      ref={(node) => {
+        wrapRef.current = node;
+        dropRef.current = node;
+      }}
+      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''} ${isOver ? 'is-file-drop' : ''}`}
       style={{
         '--gd-font-family': FONT_STACKS[preferences.fontFamily] || FONT_STACKS.system,
         '--gd-font-size': `${preferences.fontSize}px`,
@@ -182,6 +363,9 @@ export default function Editor({ content, editable = true, pageId, onUpdate, onR
       {editable && <BubbleToolbar editor={editor} />}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
+      {collab && livePointers && <PointerLayer peers={peers} />}
+      {vimEnabled && <VimStatus editor={editor} />}
+      {editable && documentPrompt}
     </div>
   );
 }

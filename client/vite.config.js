@@ -8,7 +8,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:3000' },
+    proxy: {
+      // Must come first: the collab endpoint is a websocket upgrade, and vite
+      // matches proxy entries in declaration order.
+      '/api/collab': { target: 'ws://localhost:3000', ws: true },
+      '/api': 'http://localhost:3000',
+    },
   },
   build: {
     outDir: 'dist',

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { q } from '../db.js';
 import { asyncRoute, httpError, slugify } from '../lib/util.js';
 import { requireAuth } from '../lib/auth.js';
+import { getWorkspace } from '../lib/workspace.js';
 
 const USERNAME_RE = /^[a-zA-Z0-9._@-]{2,64}$/;
 
@@ -15,8 +16,8 @@ export default function authRoutes(redis) {
     '/status',
     asyncRoute(async (_req, res) => {
       const { rows } = await q('SELECT count(*)::int AS n FROM users');
-      const { rows: ws } = await q("SELECT value FROM settings WHERE key = 'workspace'");
-      res.json({ needsSetup: rows[0].n === 0, workspaceName: ws[0]?.value?.name || 'Diomedes' });
+      const workspace = await getWorkspace();
+      res.json({ needsSetup: rows[0].n === 0, workspaceName: workspace.name });
     })
   );
 
@@ -83,8 +84,10 @@ export default function authRoutes(redis) {
     '/me',
     requireAuth,
     asyncRoute(async (req, res) => {
-      const { rows: ws } = await q("SELECT value FROM settings WHERE key = 'workspace'");
-      res.json({ user: req.user, workspaceName: ws[0]?.value?.name || 'Diomedes' });
+      // `workspace` carries the workspace-wide switches (data savings); the flat
+      // `workspaceName` stays for the header and older clients.
+      const workspace = await getWorkspace();
+      res.json({ user: req.user, workspaceName: workspace.name, workspace });
     })
   );
 

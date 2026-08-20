@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { q } from '../db.js';
 import { asyncRoute, httpError } from '../lib/util.js';
 import { requireAuth, requireAdmin } from '../lib/auth.js';
+import { publish, adminAudience } from '../lib/events.js';
 import { USERNAME_RE } from './auth.js';
 
 const router = Router();
@@ -40,6 +41,7 @@ router.post(
        RETURNING id, username, name, role, active, created_at`,
       [username.toLowerCase(), name.trim(), hash, role]
     );
+    publish({ type: 'users-changed', userIds: await adminAudience() });
     res.status(201).json({ user: rows[0] });
   })
 );
@@ -76,6 +78,10 @@ router.patch(
       'SELECT id, username, name, role, active, created_at FROM users WHERE id = $1',
       [target.id]
     );
+    // Tell the affected user right away (a role change or deactivation should
+    // land on their screen without a refresh), and refresh every admin's list.
+    publish({ type: 'account-changed', userIds: [target.id] });
+    publish({ type: 'users-changed', userIds: await adminAudience([target.id]) });
     res.json({ user: updated[0] });
   })
 );
@@ -89,7 +95,10 @@ router.delete(
     if (!target) throw httpError(404, 'User not found');
     if (target.role === 'owner') throw httpError(403, 'The owner cannot be deleted');
     if (target.id === req.user.id) throw httpError(400, 'You cannot delete yourself');
+    const audience = await adminAudience([target.id]);
     await q('DELETE FROM users WHERE id = $1', [target.id]);
+    publish({ type: 'account-changed', userIds: [target.id] });
+    publish({ type: 'users-changed', userIds: audience });
     res.json({ ok: true });
   })
 );

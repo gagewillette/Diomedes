@@ -104,6 +104,19 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   last_used_at timestamptz
 );
 
+CREATE TABLE IF NOT EXISTS page_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id uuid NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  target_id uuid REFERENCES pages(id) ON DELETE CASCADE,
+  target_title text NOT NULL DEFAULT '',
+  by_id boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS page_links_source_idx ON page_links (source_id);
+CREATE INDEX IF NOT EXISTS page_links_target_idx ON page_links (target_id);
+CREATE INDEX IF NOT EXISTS page_links_title_idx ON page_links
+  (lower(regexp_replace(btrim(target_title), '\s+', ' ', 'g'))) WHERE target_id IS NULL;
+
 CREATE TABLE IF NOT EXISTS attachments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   page_id uuid REFERENCES pages(id) ON DELETE CASCADE,
@@ -151,6 +164,19 @@ export async function migrate() {
   await q(SCHEMA);
   // additive migrations for existing deployments
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'`);
+  // Realtime collaboration: the encoded Yjs document is the live source of
+  // truth while a page is open; pages.content stays as the queryable snapshot.
+  await q(`
+    CREATE TABLE IF NOT EXISTS page_ydoc (
+      page_id uuid PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+      state bytea NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  // collab_seeded records that pages.content has been converted into the CRDT
+  // exactly once; the claim timestamp is the lease that makes that conversion
+  // safe when several clients open a page at the same instant.
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS collab_seeded boolean NOT NULL DEFAULT false`);
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS collab_seed_claimed_at timestamptz`);
   await q(
     `ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding_status text NOT NULL DEFAULT 'disabled'
      CHECK (embedding_status IN ('pending','processing','ready','failed','disabled'))`

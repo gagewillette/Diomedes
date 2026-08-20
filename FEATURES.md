@@ -23,6 +23,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Excalidraw diagrams | ✅ Full Excalidraw editor in a modal, scene stored in the doc |
 | Draw.io diagrams | ✅ Full diagrams.net editor in a modal (embed.diagrams.net postMessage integration); XML + SVG preview stored in the doc |
 | Images / video / file attachments | ✅ Upload to server-local storage, drag-drop and paste images |
+| PDF / PowerPoint documents | ✅ `/document` or drag-drop inserts a document bar. PDFs open in the browser's native viewer in a new tab; a PPTX is stored as-is (download only) or converted to PDF server-side on upload. Stored under a per-user directory |
 | Embeds (YouTube, iframe → Airtable/Loom/Miro/Figma/etc.) | ✅ YouTube node + generic iframe embed node (paste any embed URL) |
 | @-mention users | ✅ |
 | @-mention pages | ➖ Use normal links to pages |
@@ -38,7 +39,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 
 | Docmost capability | Diomedes |
 |---|---|
-| Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ➖ v1 uses autosave (800 ms debounce), last-write-wins + full version history for recovery. Real-time CRDT sync is the one large omission |
+| Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ✅ Yjs CRDT over a websocket at `/api/collab/<pageId>`, persisted to postgres and mirrored between app processes over Redis. Live carets while typing, Miro-style mouse pointers while reading, colours derived from the user id — see [docs/realtime-collaboration.md](docs/realtime-collaboration.md) |
 | Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
 | Find in page (Ctrl/⌘+F) | ✅ Overrides the browser's find — literal or regular-expression search with match counter, next/previous, case toggle and in-place highlighting; works on shared read-only pages too |
@@ -60,7 +61,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
-| Nested page tree with reordering | ✅ Infinite nesting, move up/down/indent/outdent + move-to-space |
+| Nested page tree with reordering | ✅ Infinite nesting, drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |
@@ -71,6 +72,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Page-level permissions (Enterprise) | ➖ Space-level scoping only |
 | API & MCP | ✅ Bearer API tokens (Settings → API tokens) work on every endpoint alongside sessions; full surface documented in docs/API.md with an MCP tool sketch |
 | User preferences (docmost: theme/language) | ✅ Per-user editor prefs: font, size, line spacing, page width, smooth caret, animations |
+| Workspace-wide settings | ✅ Settings → Workspace settings (admins only): **Data savings** — turn off live pointers, turn off file uploads. Existing files keep working when uploads are off |
 
 ## Infrastructure parity
 

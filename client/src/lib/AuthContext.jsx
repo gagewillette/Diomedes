@@ -1,16 +1,31 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { notifications } from '@mantine/notifications';
 import { api } from './api.js';
+import { startRealtime } from './realtime.js';
 import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
+import { mergeWorkspace, DEFAULT_WORKSPACE } from './workspace.js';
+
+const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [state, setState] = useState({ loading: true, user: null, workspaceName: 'Diomedes' });
+  const [state, setState] = useState({
+    loading: true,
+    user: null,
+    workspaceName: DEFAULT_WORKSPACE.name,
+    workspace: DEFAULT_WORKSPACE,
+  });
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.get('/api/auth/me', { noRedirect: true });
-      setState({ loading: false, user: data.user, workspaceName: data.workspaceName });
+      setState({
+        loading: false,
+        user: data.user,
+        workspaceName: data.workspaceName,
+        workspace: mergeWorkspace(data.workspace),
+      });
     } catch {
       setState((s) => ({ ...s, loading: false, user: null }));
     }
@@ -19,6 +34,66 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Live updates: when an admin changes this user's workspace role or their
+  // membership in a space, push it straight into the UI instead of waiting for
+  // them to reload. Screens listen on the same window events they already use
+  // for local changes.
+  useEffect(() => {
+    if (!state.user) return undefined;
+    return startRealtime((type, detail) => {
+      switch (type) {
+        case 'account-changed':
+          // May also mean "deactivated" — refresh() then 401s and drops them to /login.
+          refresh();
+          // A workspace role change moves access in every space at once, so
+          // re-check the spaces and whatever is open (no spaceId == "all").
+          emit('spaces-changed', {});
+          emit('space-members-changed', {});
+          notifications.show({ message: 'Your workspace access was updated.' });
+          break;
+        case 'spaces-changed':
+          emit('spaces-changed', detail);
+          break;
+        case 'space-members-changed':
+          emit('space-members-changed', detail);
+          break;
+        case 'users-changed':
+          emit('users-changed', detail);
+          break;
+        case 'pages-changed':
+          // Someone rearranged a tree. Screens already listen on this channel
+          // for their own edits, so the sidebar redraws and every [[link]] chip
+          // re-resolves the URL it renders.
+          emit('pages-changed', detail);
+          break;
+        case 'page-moved':
+          // A page changed space, which changes its URL. Whoever has it open
+          // reroutes; everyone else has already been covered by 'pages-changed'.
+          emit('page-moved', detail);
+          break;
+        case 'workspace-settings-changed':
+          // Workspace-wide switches take effect everywhere at once: the payload
+          // carries the new settings, so no refetch is needed.
+          setState((s) => ({
+            ...s,
+            workspace: mergeWorkspace(detail.workspace),
+            workspaceName: detail.workspace?.name || s.workspaceName,
+          }));
+          break;
+        case 'reconnected':
+          // Anything pushed while the stream was down was missed; re-sync.
+          refresh();
+          emit('spaces-changed', {});
+          emit('users-changed', {});
+          emit('space-members-changed', {});
+          emit('pages-changed', {});
+          break;
+        default:
+          break;
+      }
+    });
+  }, [state.user?.id, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(async () => {
     await api.post('/api/auth/logout');
@@ -37,9 +112,26 @@ export function AuthProvider({ children }) {
     [state.user?.preferences] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Admin-only write; every browser (including this one) picks the change up
+  // again over SSE, which is what keeps other tabs in step.
+  const updateDataSavings = useCallback(async (partial) => {
+    const data = await api.patch('/api/workspace/settings/data-savings', { dataSavings: partial });
+    setState((s) => ({ ...s, workspace: mergeWorkspace(data.workspace) }));
+    return data.workspace;
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ ...state, refresh, logout, isAdmin, preferences, updatePreferences }}
+      value={{
+        ...state,
+        refresh,
+        logout,
+        isAdmin,
+        preferences,
+        updatePreferences,
+        dataSavings: state.workspace.dataSavings,
+        updateDataSavings,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -47,4 +139,10 @@ export function AuthProvider({ children }) {
 }
 
 // Safe outside AuthProvider (public share pages): falls back to defaults.
-export const useAuth = () => useContext(AuthContext) || { user: null, preferences: DEFAULT_PREFS };
+export const useAuth = () =>
+  useContext(AuthContext) || {
+    user: null,
+    preferences: DEFAULT_PREFS,
+    workspace: DEFAULT_WORKSPACE,
+    dataSavings: DEFAULT_WORKSPACE.dataSavings,
+  };

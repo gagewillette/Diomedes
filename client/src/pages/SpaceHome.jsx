@@ -1,29 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Container, Title, Text, Group, Button, Stack, UnstyledButton, Modal, Table, Select,
-  TextInput, ActionIcon, Tooltip, Menu, Loader, Center,
+  TextInput, ActionIcon, Tooltip, Menu, Loader, Center, Paper, SimpleGrid, Divider,
+  Progress, Badge, Box,
 } from '@mantine/core';
 import {
   IconPlus, IconTrash, IconUsers, IconSettings, IconFileImport, IconRestore,
-  IconFileText, IconDots, IconX,
+  IconFileText, IconDots, IconX, IconInfoCircle, IconPaperclip, IconDatabase,
+  IconHistory, IconMessage,
 } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
-import { api, emitPagesChanged } from '../lib/api.js';
+import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { markdownToJSON } from '../lib/markdown.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 
 export default function SpaceHome() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [space, setSpace] = useState(null);
   const [pages, setPages] = useState([]);
   const [membersOpen, membersHandlers] = useDisclosure(false);
   const [trashOpen, trashHandlers] = useDisclosure(false);
   const [settingsOpen, settingsHandlers] = useDisclosure(false);
+  const [infoOpen, infoHandlers] = useDisclosure(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -39,6 +42,20 @@ export default function SpaceHome() {
   }, [slug, navigate]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live permission changes. A membership event with no spaceId is a broad
+  // "something moved" signal (reconnect or a workspace role change); one naming
+  // another user only matters to the members list, which reloads on its own.
+  useEffect(
+    () =>
+      onAppEvent('space-members-changed', (e) => {
+        const d = e.detail || {};
+        const mine = !d.userId || d.userId === user?.id;
+        if (mine && (!d.spaceId || !space || d.spaceId === space.id)) load();
+      }),
+    [load, space, user?.id]
+  );
+  useEffect(() => onAppEvent('spaces-changed', load), [load]);
 
   if (!space) return <Center h="60vh"><Loader /></Center>;
   const canWrite = ['admin', 'writer'].includes(space.my_role);
@@ -84,7 +101,7 @@ export default function SpaceHome() {
           {canWrite && (
             <>
               <Button size="xs" leftSection={<IconPlus size={14} />} onClick={newPage}>New page</Button>
-              <Tooltip label="Import markdown files">
+              <Tooltip label="Import documents">
                 <ActionIcon variant="default" onClick={() => fileInputRef.current?.click()}>
                   <IconFileImport size={16} />
                 </ActionIcon>
@@ -93,20 +110,20 @@ export default function SpaceHome() {
                 ref={fileInputRef} type="file" accept=".md,.markdown,.txt" multiple hidden
                 onChange={(e) => { importMarkdown(Array.from(e.target.files)); e.target.value = ''; }}
               />
-              <Tooltip label="Trash">
-                <ActionIcon variant="default" onClick={trashHandlers.open}><IconTrash size={16} /></ActionIcon>
-              </Tooltip>
             </>
           )}
           {isSpaceAdmin && (
-            <>
-              <Tooltip label="Members">
-                <ActionIcon variant="default" onClick={membersHandlers.open}><IconUsers size={16} /></ActionIcon>
-              </Tooltip>
-              <Tooltip label="Space settings">
-                <ActionIcon variant="default" onClick={settingsHandlers.open}><IconSettings size={16} /></ActionIcon>
-              </Tooltip>
-            </>
+            <Tooltip label="Members">
+              <ActionIcon variant="default" onClick={membersHandlers.open}><IconUsers size={16} /></ActionIcon>
+            </Tooltip>
+          )}
+          <Tooltip label="Space information">
+            <ActionIcon variant="default" onClick={infoHandlers.open}><IconInfoCircle size={16} /></ActionIcon>
+          </Tooltip>
+          {isSpaceAdmin && (
+            <Tooltip label="Space settings">
+              <ActionIcon variant="default" onClick={settingsHandlers.open}><IconSettings size={16} /></ActionIcon>
+            </Tooltip>
           )}
         </Group>
       </Group>
@@ -129,6 +146,10 @@ export default function SpaceHome() {
       </Stack>
 
       <MembersModal space={space} opened={membersOpen} onClose={membersHandlers.close} />
+      <SpaceInfoModal
+        space={space} opened={infoOpen} onClose={infoHandlers.close}
+        onOpenTrash={canWrite ? () => { infoHandlers.close(); trashHandlers.open(); } : null}
+      />
       <TrashModal space={space} opened={trashOpen} onClose={trashHandlers.close} onChanged={load} />
       <SpaceSettingsModal
         space={space} opened={settingsOpen} onClose={settingsHandlers.close}
@@ -136,6 +157,208 @@ export default function SpaceHome() {
         onDeleted={() => { window.dispatchEvent(new Event('spaces-changed')); navigate('/'); }}
       />
     </Container>
+  );
+}
+
+// Renders bytes with the largest unit that keeps the number readable.
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = n / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function StatTile({ icon, label, value, hint }) {
+  return (
+    <Paper withBorder radius="md" p="sm">
+      <Group gap={6} mb={4}>
+        {icon}
+        <Text size="xs" c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: 0.4 }}>{label}</Text>
+      </Group>
+      <Text fw={700} style={{ fontSize: 22, lineHeight: 1.2 }}>{value}</Text>
+      {hint && <Text size="xs" c="dimmed">{hint}</Text>}
+    </Paper>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <Group justify="space-between" gap="lg" wrap="nowrap">
+      <Text size="sm" c="dimmed">{label}</Text>
+      <Text size="sm" ta="right">{value}</Text>
+    </Group>
+  );
+}
+
+function SpaceInfoModal({ space, opened, onClose, onOpenTrash }) {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!opened) return;
+    let cancelled = false;
+    setStats(null);
+    setError(null);
+    api.get(`/api/spaces/${space.id}/stats`)
+      .then((d) => { if (!cancelled) setStats(d.stats); })
+      .catch((err) => { if (!cancelled) setError(err.message); });
+    return () => { cancelled = true; };
+  }, [opened, space.id]);
+
+  const roleLabel = { admin: 'Full access', writer: 'Can edit', reader: 'Can view' }[space.my_role] || space.my_role;
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Space information" size="lg">
+      {error && <Text c="red" size="sm">{error}</Text>}
+      {!stats && !error && <Center py="xl"><Loader size="sm" /></Center>}
+      {stats && (
+        <Stack gap="md">
+          <Group gap={12} wrap="nowrap" align="flex-start">
+            <Text style={{ fontSize: 34, lineHeight: 1 }}>{stats.space.icon}</Text>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Text fw={600}>{stats.space.name}</Text>
+              <Text size="sm" c="dimmed">
+                {stats.space.description || 'No description'}
+              </Text>
+              <Group gap={6} mt={6}>
+                <Badge size="sm" variant="light">/{stats.space.slug}</Badge>
+                <Badge size="sm" variant="light" color="gray">Your role: {roleLabel}</Badge>
+              </Group>
+            </div>
+          </Group>
+
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+            <StatTile
+              icon={<IconUsers size={14} />} label="Members" value={stats.members.total}
+              hint={`${stats.members.admins} admin${stats.members.admins === 1 ? '' : 's'}`}
+            />
+            <StatTile
+              icon={<IconFileText size={14} />} label="Documents" value={stats.pages.active}
+              hint={formatBytes(stats.pages.bytes)}
+            />
+            <StatTile
+              icon={<IconPaperclip size={14} />} label="Files" value={stats.files.count}
+              hint={formatBytes(stats.files.bytes)}
+            />
+            <StatTile
+              icon={<IconDatabase size={14} />} label="Total size" value={formatBytes(stats.totalBytes)}
+              hint="docs + files + history"
+            />
+          </SimpleGrid>
+
+          <div>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={6} style={{ letterSpacing: 0.4 }}>
+              Storage breakdown
+            </Text>
+            <Progress.Root size="lg" radius="sm">
+              <Progress.Section
+                value={pct(stats.pages.bytes, stats.totalBytes)} color="blue"
+                tooltip={`Documents — ${formatBytes(stats.pages.bytes)}`}
+              />
+              <Progress.Section
+                value={pct(stats.files.bytes, stats.totalBytes)} color="grape"
+                tooltip={`Files — ${formatBytes(stats.files.bytes)}`}
+              />
+              <Progress.Section
+                value={pct(stats.versions.bytes, stats.totalBytes)} color="gray"
+                tooltip={`Version history — ${formatBytes(stats.versions.bytes)}`}
+              />
+            </Progress.Root>
+            <Group gap="md" mt={6}>
+              <LegendDot color="blue" label={`Documents ${formatBytes(stats.pages.bytes)}`} />
+              <LegendDot color="grape" label={`Files ${formatBytes(stats.files.bytes)}`} />
+              <LegendDot color="gray" label={`History ${formatBytes(stats.versions.bytes)}`} />
+            </Group>
+          </div>
+
+          <Divider />
+
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing={6}>
+            <InfoRow label="Top-level documents" value={stats.pages.topLevel} />
+            <InfoRow label="Characters written" value={stats.pages.characters.toLocaleString()} />
+            <InfoRow label="Publicly shared pages" value={stats.pages.shared} />
+            <InfoRow label="File types" value={stats.files.mimeTypes} />
+            <InfoRow
+              label="Version snapshots"
+              value={<><IconHistory size={12} style={{ verticalAlign: -1 }} /> {stats.versions.count}</>}
+            />
+            <InfoRow
+              label="Comments"
+              value={
+                <><IconMessage size={12} style={{ verticalAlign: -1 }} /> {stats.comments.total}
+                  {stats.comments.open > 0 && <Text span c="dimmed"> ({stats.comments.open} open)</Text>}
+                </>
+              }
+            />
+            <InfoRow
+              label="Last edited"
+              value={stats.pages.lastUpdatedAt ? dayjs(stats.pages.lastUpdatedAt).format('MMM D, YYYY h:mm A') : '—'}
+            />
+            <InfoRow
+              label="Last file upload"
+              value={stats.files.lastUploadedAt ? dayjs(stats.files.lastUploadedAt).format('MMM D, YYYY') : '—'}
+            />
+            <InfoRow label="Created" value={dayjs(stats.space.created_at).format('MMM D, YYYY')} />
+            <InfoRow label="Created by" value={stats.space.created_by_name || 'Unknown'} />
+          </SimpleGrid>
+
+          {stats.topContributors.length > 0 && (
+            <>
+              <Divider />
+              <div>
+                <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={6} style={{ letterSpacing: 0.4 }}>
+                  Top contributors
+                </Text>
+                <Stack gap={4}>
+                  {stats.topContributors.map((c) => (
+                    <Group key={c.username} justify="space-between" gap="lg" wrap="nowrap">
+                      <Text size="sm" truncate>
+                        {c.name} <Text span c="dimmed" size="xs">@{c.username}</Text>
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        {c.pages} doc{c.pages === 1 ? '' : 's'}
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </div>
+            </>
+          )}
+
+          <Group justify="space-between">
+            <Text size="sm" c="dimmed">
+              {stats.pages.trashed} document{stats.pages.trashed === 1 ? '' : 's'} in trash
+            </Text>
+            {onOpenTrash && (
+              <Button
+                size="xs" variant="default" leftSection={<IconTrash size={14} />}
+                onClick={onOpenTrash}
+              >
+                View trash
+              </Button>
+            )}
+          </Group>
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
+function pct(part, total) {
+  const t = Number(total) || 0;
+  if (!t) return 0;
+  return (Number(part) / t) * 100;
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <Group gap={5} wrap="nowrap">
+      <Box w={8} h={8} style={{ borderRadius: 2, background: `var(--mantine-color-${color}-6)` }} />
+      <Text size="xs" c="dimmed">{label}</Text>
+    </Group>
   );
 }
 
@@ -153,6 +376,16 @@ function MembersModal({ space, opened, onClose }) {
   }, [space.id]);
 
   useEffect(() => { if (opened) load(); }, [opened, load]);
+  useEffect(() => {
+    if (!opened) return undefined;
+    const reload = (e) => {
+      const spaceId = e.detail?.spaceId;
+      if (!spaceId || spaceId === space.id) load();
+    };
+    const offMembers = onAppEvent('space-members-changed', reload);
+    const offUsers = onAppEvent('users-changed', reload);
+    return () => { offMembers(); offUsers(); };
+  }, [opened, load, space.id]);
 
   const nonMembers = allUsers.filter((u) => !members.some((m) => m.user_id === u.id));
 

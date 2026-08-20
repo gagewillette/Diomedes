@@ -3,6 +3,10 @@ import { q } from '../db.js';
 import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
+import { getHub } from '../collab/index.js';
+import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
+import { movePage } from '../lib/pageMove.js';
+import { publish, spaceAudience } from '../lib/events.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -11,6 +15,12 @@ const TSV_SQL = `to_tsvector('english', left(coalesce($1,'') || ' ' || coalesce(
 const VERSION_INTERVAL_MIN = 10;
 
 const accessibleSpacesCTE = accessibleSpacesQuery;
+
+const spaceIdsOfPages = async (pageIds) => {
+  if (!pageIds.length) return [];
+  const { rows } = await q('SELECT DISTINCT space_id FROM pages WHERE id = ANY($1::uuid[])', [pageIds]);
+  return rows.map((r) => r.space_id);
+};
 
 // ---- listing ----
 
@@ -45,6 +55,69 @@ router.get(
   })
 );
 
+// Autocomplete for [[wiki links]] and the parent-page picker. Searches every
+// space the caller can read, but floats the space they are writing in to the
+// top so linking within a space stays a two-keystroke affair.
+router.get(
+  '/pages/link-search',
+  asyncRoute(async (req, res) => {
+    const query = (req.query.q || '').trim();
+    const acc = accessibleSpacesCTE(req.user);
+    const params = [...acc.params];
+    const bind = (value) => `$${params.push(value)}`;
+
+    const conds = [`p.deleted_at IS NULL`, `p.space_id IN (${acc.sql})`];
+    if (query) conds.push(`p.title ILIKE ${bind(`%${query}%`)}`);
+    if (req.query.exclude) conds.push(`p.id <> ${bind(req.query.exclude)}`);
+
+    // A parent page has to live in the same space as its child, so the parent
+    // picker asks for a hard filter where the [[link]] picker only wants the
+    // current space floated to the top.
+    let preferSpace = '';
+    if (req.query.spaceId) {
+      const spaceParam = bind(req.query.spaceId);
+      if (req.query.onlySpace) conds.push(`p.space_id = ${spaceParam}`);
+      else preferSpace = `(p.space_id = ${spaceParam}) DESC, `;
+    }
+
+    const { rows } = await q(
+      `SELECT p.id, p.title, p.icon, p.space_id,
+              s.slug AS space_slug, s.name AS space_name, s.icon AS space_icon
+       FROM pages p JOIN spaces s ON s.id = p.space_id
+       WHERE ${conds.join(' AND ')}
+       ORDER BY ${preferSpace}p.updated_at DESC
+       LIMIT 12`,
+      params
+    );
+    res.json({ pages: rows });
+  })
+);
+
+// Live titles for the page ids embedded in a document's [[links]]. A link
+// stores the title it was written with, but the page it points at may have been
+// renamed since — resolving by id here keeps the rendered chip honest.
+router.get(
+  '/pages/titles',
+  asyncRoute(async (req, res) => {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => /^[0-9a-f-]{36}$/i.test(id))
+      .slice(0, 100);
+    if (!ids.length) return res.json({ pages: [] });
+    const acc = accessibleSpacesCTE(req.user);
+    const { rows } = await q(
+      `SELECT p.id, p.title, p.icon, s.slug AS space_slug
+       FROM pages p JOIN spaces s ON s.id = p.space_id
+       WHERE p.id = ANY($${acc.params.length + 1}::uuid[])
+         AND p.deleted_at IS NULL
+         AND p.space_id IN (${acc.sql})`,
+      [...acc.params, ids]
+    );
+    res.json({ pages: rows });
+  })
+);
+
 // ---- CRUD ----
 
 router.post(
@@ -67,6 +140,7 @@ router.post(
       [spaceId, parentId, title, pos[0].next, req.user.id]
     );
     notePageChanged(rows[0].id, rows[0].updated_at);
+    if (title) await resolveLinksByTitle(rows[0]);
     res.status(201).json({ page: rows[0] });
   })
 );
@@ -128,37 +202,191 @@ router.patch(
       [page.id, req.user.id, newTitle, icon, JSON.stringify(newContent), text]
     );
     notePageChanged(rows[0].id, rows[0].updated_at);
+
+    if (content !== undefined) await syncPageLinks(page.id, newContent, page.space_id);
+    if (title !== undefined && title !== page.title) {
+      // A rename can both attract dangling links and orphan ones that had
+      // adopted the old title.
+      await resolveLinksByTitle({ id: page.id, title: newTitle, space_id: page.space_id });
+      await unresolveStaleTitleLinks({ id: page.id, title: newTitle });
+    }
     res.json({ page: rows[0] });
   })
 );
 
+// ---- realtime collaboration ----
+
+// How long a seed claim is honoured before another client may take it over. A
+// client that wins the claim and then dies (closed tab, lost network) would
+// otherwise leave the page permanently stuck at an empty CRDT document.
+const SEED_LEASE_SEC = 15;
+
+// Converting the stored pages.content JSON into the CRDT has to happen exactly
+// once. If two browsers open a fresh page simultaneously and both convert, both
+// insertions are valid CRDT operations and the document ends up containing the
+// page twice — Yjs has no way to know they meant the same thing. So the claim
+// is arbitrated here, by a single conditional UPDATE: postgres row locking
+// decides the winner and everyone else waits for the sync to arrive.
+//
+// The NOT EXISTS guard closes the other end of it: once any CRDT state has been
+// persisted for the page, seeding can never fire again. Without it, deleting
+// every word on a page would make it look unseeded and resurrect the old text.
+router.post(
+  '/pages/:id/collab/claim-seed',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'writer');
+    const { rows } = await q(
+      `UPDATE pages SET collab_seed_claimed_at = now()
+       WHERE id = $1 AND collab_seeded = false
+         AND NOT EXISTS (SELECT 1 FROM page_ydoc y WHERE y.page_id = pages.id)
+         AND (collab_seed_claimed_at IS NULL
+              OR collab_seed_claimed_at < now() - ($2 || ' seconds')::interval)
+       RETURNING id`,
+      [page.id, SEED_LEASE_SEC]
+    );
+    res.json({ granted: rows.length > 0, content: rows.length > 0 ? page.content : null });
+  })
+);
+
+// Confirmation that the winner actually wrote the content into the CRDT. Only
+// now is the claim retired for good.
+router.post(
+  '/pages/:id/collab/confirm-seed',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'writer');
+    await q('UPDATE pages SET collab_seeded = true WHERE id = $1', [page.id]);
+    res.json({ ok: true });
+  })
+);
+
+// ---- links & backlinks ----
+
+// Pages that point *at* this one. A link whose target sits in the trash simply
+// stops appearing rather than being deleted, so restoring a page restores its
+// backlinks too.
+router.get(
+  '/pages/:id/backlinks',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const acc = accessibleSpacesCTE(req.user);
+    const { rows } = await q(
+      `SELECT DISTINCT p.id, p.title, p.icon, p.space_id, p.updated_at,
+              s.slug AS space_slug, s.name AS space_name
+       FROM page_links l
+       JOIN pages p ON p.id = l.source_id
+       JOIN spaces s ON s.id = p.space_id
+       WHERE l.target_id = $${acc.params.length + 1}
+         AND p.deleted_at IS NULL
+         AND p.id <> $${acc.params.length + 1}
+         AND p.space_id IN (${acc.sql})
+       ORDER BY p.updated_at DESC`,
+      [...acc.params, page.id]
+    );
+    res.json({ backlinks: rows });
+  })
+);
+
+// Pages this one points at, including links that resolve to nothing yet.
+router.get(
+  '/pages/:id/links',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const { rows } = await q(
+      `SELECT l.target_id, l.target_title,
+              t.title, t.icon, t.space_id, s.slug AS space_slug
+       FROM page_links l
+       LEFT JOIN pages t ON t.id = l.target_id AND t.deleted_at IS NULL
+       LEFT JOIN spaces s ON s.id = t.space_id
+       WHERE l.source_id = $1
+       ORDER BY COALESCE(t.title, l.target_title)`,
+      [page.id]
+    );
+    res.json({
+      links: rows.map((r) => ({
+        pageId: r.target_id && r.title !== null ? r.target_id : null,
+        title: r.title ?? r.target_title,
+        icon: r.icon || '',
+        spaceSlug: r.space_slug || null,
+      })),
+    });
+  })
+);
+
+// Reparent and/or reorder a page — the endpoint behind drag-and-drop in the
+// sidebar as well as the tree's keyboard/menu commands.
+//
+// `index` is the slot the page should occupy among its new siblings, resolved
+// against the database rather than the dragging browser's copy of the tree: two
+// people rearranging the same list at once both get a sensible result instead of
+// the second one overwriting a position computed from a stale list.
+//
+// A destination `spaceId` moves the page and its whole subtree between spaces,
+// which needs write access on both sides — one to take the page out, one to put
+// it in.
 router.post(
   '/pages/:id/move',
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    const { parentId = null, position } = req.body || {};
-    if (parentId) {
-      const parent = await getPage(parentId);
-      if (parent.space_id !== page.space_id) throw httpError(400, 'Cannot move across spaces');
-      // prevent cycles: walk up from the new parent
-      let cursor = parent;
-      while (cursor) {
-        if (cursor.id === page.id) throw httpError(400, 'Cannot move a page inside itself');
-        cursor = cursor.parent_id ? await getPage(cursor.parent_id) : null;
+    const { parentId = null, spaceId = null, index, position } = req.body || {};
+
+    const targetSpaceId = spaceId || page.space_id;
+    if (targetSpaceId !== page.space_id) await assertSpaceRole(req.user, targetSpaceId, 'writer');
+    if (index !== undefined && index !== null && !Number.isInteger(index)) {
+      throw httpError(400, 'index must be a whole number');
+    }
+
+    const result = await movePage({ page, parentId, spaceId: targetSpaceId, index, position });
+
+    if (result.crossSpace) {
+      // Outside the move's transaction on purpose: this is the same link
+      // resolution an edit runs, reused rather than reimplemented in SQL. It is
+      // idempotent, so the worst a crash in the middle can do is leave some
+      // links resolved against the old space until the page is next saved.
+      //
+      // Each moved page now resolves its own `[[Title]]` links against the new
+      // space, and its title is newly available there to links that were
+      // waiting for a page by that name.
+      for (const movedId of result.movedIds) {
+        const moved = await getPage(movedId);
+        await syncPageLinks(moved.id, moved.content, moved.space_id);
+        await resolveLinksByTitle(moved);
       }
     }
-    let pos = position;
-    if (pos === undefined || pos === null) {
-      const { rows } = await q(
-        `SELECT COALESCE(MAX(position), 0) + 1000 AS next FROM pages
-         WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL`,
-        [page.space_id, parentId]
-      );
-      pos = rows[0].next;
+
+    // A tree redraw only concerns the space it happened in, so each side is
+    // told about its own space and nothing else.
+    const fromAudience = await spaceAudience(result.fromSpaceId);
+    publish({ type: 'pages-changed', spaceId: result.fromSpaceId, userIds: fromAudience });
+    const toAudience = result.crossSpace ? await spaceAudience(result.toSpaceId) : [];
+    if (result.crossSpace) {
+      publish({ type: 'pages-changed', spaceId: result.toSpaceId, userIds: toAudience });
     }
-    await q('UPDATE pages SET parent_id = $1, position = $2 WHERE id = $3', [parentId, pos, page.id]);
-    res.json({ ok: true });
+
+    // The move reaches further than the two trees. Anyone *reading* a moved
+    // page has stale breadcrumbs and, after a cross-space move, a URL naming
+    // the wrong space. And anyone reading a page that links into the subtree —
+    // which can be a third space entirely — is looking at a link chip whose
+    // cached URL was just rewritten underneath them. Those readers are exactly
+    // the members of the spaces owning the pages that were rewritten, so the
+    // event goes to them and stops there.
+    const linkAudiences = await Promise.all(
+      [...new Set(await spaceIdsOfPages(result.rewrittenIds))].map((id) => spaceAudience(id))
+    );
+    publish({
+      type: 'page-moved',
+      pageIds: result.movedIds,
+      spaceId: result.toSpaceId,
+      spaceSlug: result.spaceSlug,
+      crossSpace: result.crossSpace,
+      userIds: [...new Set([...fromAudience, ...toAudience, ...linkAudiences.flat()])],
+    });
+
+    res.json({ ok: true, spaceId: result.toSpaceId, spaceSlug: result.spaceSlug, position: result.position });
   })
 );
 
@@ -274,6 +502,16 @@ router.post(
       [page.id, version.title, JSON.stringify(version.content), text, req.user.id]
     );
     notePageChanged(restored[0].id, restored[0].updated_at);
+    // A restore replaces the document wholesale, which the CRDT cannot express
+    // as an edit. Drop the stored doc and the seed flag so the next client
+    // rebuilds it from the restored JSON, and disconnect anyone still holding
+    // the old one.
+    await q('DELETE FROM page_ydoc WHERE page_id = $1', [page.id]);
+    await q(
+      'UPDATE pages SET collab_seeded = false, collab_seed_claimed_at = NULL WHERE id = $1',
+      [page.id]
+    );
+    await getHub()?.resetPage(page.id);
     res.json({ ok: true });
   })
 );

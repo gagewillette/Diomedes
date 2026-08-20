@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Container, Group, Text, ActionIcon, Menu, Tooltip, Breadcrumbs, Anchor, TextInput,
   Popover, Button, Switch, Stack, Loader, Center, CopyButton,
 } from '@mantine/core';
 import {
   IconStar, IconStarFilled, IconDots, IconHistory, IconMessageCircle, IconShare,
-  IconTrash, IconDownload, IconPrinter, IconCheck, IconCopy, IconMoodSmile,
+  IconTrash, IconDownload, IconPrinter, IconCheck, IconCopy, IconMoodSmile, IconSitemap,
 } from '@tabler/icons-react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
-import { api, emitPagesChanged } from '../lib/api.js';
+import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { WIDTH_TO_CONTAINER } from '../lib/prefs.js';
 import { downloadFile } from '../lib/markdown.js';
@@ -18,10 +18,17 @@ import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import HistoryModal from '../components/HistoryModal.jsx';
 import FindBar from '../components/FindBar.jsx';
+import PresenceBar from '../components/PresenceBar.jsx';
+import { useCollabSession } from '../editor/collab/session.js';
+import { usePeers } from '../editor/collab/presence.js';
+import { pickUserColor } from '../lib/userColor.js';
+import BacklinksPanel from '../components/BacklinksPanel.jsx';
+import PagePicker from '../components/PagePicker.jsx';
+import { onFocusEditor, onRequestSave } from '../lib/vimFocus.js';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
-  const { preferences } = useAuth();
+  const { preferences, user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [title, setTitle] = useState('');
@@ -30,6 +37,7 @@ export default function PageEditor() {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
   const saveTimer = useRef(null);
@@ -52,7 +60,54 @@ export default function PageEditor() {
 
   useEffect(() => { load(); }, [load]);
 
+  // If my own access to this page's space changes, re-fetch so the editor
+  // reflects the new role (or bounces me out if it was revoked).
+  useEffect(
+    () =>
+      onAppEvent('space-members-changed', (e) => {
+        if (!data) return; // a load is already in flight and will be current
+        const d = e.detail || {};
+        if (d.userId && d.userId !== user?.id) return;
+        if (d.spaceId && d.spaceId !== data.page.space_id) return;
+        setReloadKey((k) => k + 1);
+      }),
+    [data, user?.id]
+  );
+
+  // Someone rearranged the tree while this page was open. Only a move that
+  // touched *this* page matters here: its breadcrumbs are now wrong, and a move
+  // between spaces has also renamed its URL, so the address bar is corrected in
+  // place rather than leaving the reader on a link that names the old space.
+  useEffect(
+    () =>
+      onAppEvent('page-moved', (e) => {
+        const d = e.detail || {};
+        if (!d.pageIds?.includes(pageId)) return;
+        if (d.crossSpace && d.spaceSlug && d.spaceSlug !== slug) {
+          navigate(`/s/${d.spaceSlug}/p/${pageId}`, { replace: true });
+          return; // the slug is a load() dependency, so this refetches too
+        }
+        setReloadKey((k) => k + 1);
+      }),
+    [pageId, slug, navigate]
+  );
+
   const canWrite = data && ['admin', 'writer'].includes(data.myRole);
+
+  // Live collaboration session for this page. Readers join too — presence is
+  // useful even when you cannot type, and the server refuses their edits.
+  const collab = useCollabSession({ pageId, enabled: Boolean(data), resetKey: reloadKey });
+  const peers = usePeers(collab);
+
+  // Memoised: the identity object is part of the editor's extension config, so
+  // a fresh object every render would tear the editor down mid-keystroke.
+  const me = useMemo(
+    () =>
+      user
+        ? { id: user.id, name: user.name || user.username, color: pickUserColor(user.id) }
+        : null,
+    [user]
+  );
 
   const saveContent = useCallback(async (editor) => {
     if (!editor) return;
@@ -66,11 +121,16 @@ export default function PageEditor() {
     }
   }, [pageId]);
 
+  // Without a collab session (never, for a normal page load — but the component
+  // has to survive one render before `data` arrives) fall back to debounced
+  // whole-document saves. With one, Editor's snapshot writer owns saving and
+  // reports its state back through onSaveState.
   const onEditorUpdate = useCallback((editor) => {
+    if (collab) return;
     setSaveState('saving');
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => saveContent(editor), 800);
-  }, [saveContent]);
+  }, [saveContent, collab]);
 
   const onTitleChange = (value) => {
     setTitle(value);
@@ -107,6 +167,16 @@ export default function PageEditor() {
 
   // A find bar left open across page switches would show stale match counts.
   useEffect(() => { setFindOpen(false); }, [pageId]);
+
+  // Ctrl+L from anywhere, and `:w` from the editor's own command line.
+  useEffect(() => {
+    const offFocus = onFocusEditor(() => editorRef.current?.commands.focus());
+    const offSave = onRequestSave(() => {
+      clearTimeout(saveTimer.current);
+      saveContent(editorRef.current);
+    });
+    return () => { offFocus(); offSave(); };
+  }, [saveContent]);
 
   // flush pending save on unmount/page switch
   useEffect(() => () => clearTimeout(saveTimer.current), [pageId]);
@@ -151,6 +221,21 @@ export default function PageEditor() {
     }
   };
 
+  // Naming a parent is an explicit link, not a nudge: pick any page in the
+  // space and the sidebar tree reflects the new nesting immediately.
+  const setParent = async (parent) => {
+    try {
+      await api.post(`/api/pages/${pageId}/move`, { parentId: parent?.id ?? null });
+      emitPagesChanged(data.page.space_id);
+      setReloadKey((k) => k + 1);
+      notifications.show({
+        message: parent ? `Nested under “${parent.title || 'Untitled'}”` : 'Moved to the top level',
+      });
+    } catch (err) {
+      notifications.show({ color: 'red', message: err.message });
+    }
+  };
+
   const deletePage = async () => {
     if (!window.confirm(`Move "${title || 'Untitled'}" to trash?`)) return;
     await api.del(`/api/pages/${pageId}`);
@@ -175,6 +260,7 @@ export default function PageEditor() {
           <Text size="sm">{title || 'Untitled'}</Text>
         </Breadcrumbs>
         <Group gap={4} wrap="nowrap">
+          <PresenceBar peers={peers} status={collab?.status} />
           <Text size="xs" c={saveState === 'error' ? 'red' : 'dimmed'} mr={4} className="gd-savestate">
             {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}
           </Text>
@@ -230,6 +316,11 @@ export default function PageEditor() {
               {canWrite && (
                 <Menu.Item leftSection={<IconMoodSmile size={14} />} onClick={setIcon}>
                   Change icon
+                </Menu.Item>
+              )}
+              {canWrite && (
+                <Menu.Item leftSection={<IconSitemap size={14} />} onClick={() => setParentPickerOpen(true)}>
+                  Set parent page
                 </Menu.Item>
               )}
               <Menu.Item leftSection={<IconHistory size={14} />} onClick={() => setHistoryOpen(true)}>
@@ -291,13 +382,28 @@ export default function PageEditor() {
           content={data.page.content}
           editable={Boolean(canWrite)}
           pageId={pageId}
+          collab={collab}
+          me={me}
+          onSaveState={setSaveState}
+          space={data.space}
           onUpdate={onEditorUpdate}
           onReady={(editor) => { editorRef.current = editor; }}
         />
+        <BacklinksPanel pageId={pageId} spaceId={data.page.space_id} />
       </Container>
 
       <FindBar editor={editorRef.current} opened={findOpen} onClose={() => setFindOpen(false)} />
 
+      <PagePicker
+        opened={parentPickerOpen}
+        onClose={() => setParentPickerOpen(false)}
+        onPick={setParent}
+        title="Set parent page"
+        spaceId={data.page.space_id}
+        exclude={pageId}
+        rootLabel="No parent (top level)"
+        onlySpace
+      />
       <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <HistoryModal
         pageId={pageId}

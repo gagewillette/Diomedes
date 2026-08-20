@@ -9,6 +9,17 @@
 
 /* ---------- smooth (Word-style) caret ---------- */
 .gd-editor-wrap { position: relative; }
+/* Shown while files are dragged over the editor. */
+.gd-editor-wrap.is-file-drop::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 2px dashed var(--mantine-color-blue-5);
+  border-radius: 8px;
+  background: var(--mantine-color-blue-light);
+  pointer-events: none;
+  z-index: 80;
+}
 .gd-caret-hidden .gd-editor { caret-color: transparent; }
 .gd-smooth-caret {
   position: absolute;
@@ -56,7 +67,9 @@
 .gd-editor h2 { font-size: 1.5em; margin-top: 1em; font-weight: 700; }
 .gd-editor h3 { font-size: 1.25em; margin-top: 0.9em; font-weight: 700; }
 .gd-editor h4 { font-size: 1.1em; font-weight: 700; }
-.gd-editor a { color: var(--mantine-color-blue-6); }
+/* Link color is for prose links only — buttons rendered as anchors (the
+   document card download button) keep their own Mantine color. */
+.gd-editor a:not(.mantine-ActionIcon-root) { color: var(--mantine-color-blue-6); }
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
@@ -260,6 +273,30 @@
   border-radius: 6px; color: var(--mantine-color-dimmed);
 }
 .gd-tree-add:hover { background: var(--mantine-color-default-hover); }
+
+/* ---------- dragging pages around the tree ---------- */
+/* The row keeps its place while it is dragged — pulling it out from under the
+   cursor would move every drop target the moment the drag began. */
+.gd-tree-row.is-dragging { opacity: 0.4; }
+.gd-tree-row[draggable='true'] { cursor: grab; }
+/* Drop hints are drawn as insets rather than borders so a row never changes
+   height mid-drag and nudges the rows below it out from under the cursor. */
+.gd-tree-row.is-drop-before,
+.gd-tree-row.is-drop-after {
+  box-shadow: inset 0 2px 0 0 var(--mantine-color-blue-filled);
+}
+.gd-tree-row.is-drop-after { box-shadow: inset 0 -2px 0 0 var(--mantine-color-blue-filled); }
+/* "Inside" reads as the page swallowing the one being dropped, so it fills
+   rather than draws a line. */
+.gd-tree-row.is-drop-inside {
+  background: var(--mantine-color-blue-light);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+}
+.gd-tree-root-drop { border-radius: 6px; }
+.gd-tree-root-drop.is-drop-root {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  background: var(--mantine-color-blue-light);
+}
 .gd-nav-link {
   display: block; padding: 6px 8px; border-radius: 6px; width: 100%;
 }
@@ -301,6 +338,60 @@
 .gd-drawio:hover .gd-node-edit-btn { opacity: 1; }
 .gd-drawio-preview { display: flex; justify-content: center; }
 .gd-drawio-preview img { max-width: 100%; }
+
+/* diagram node hover actions (zoom / edit) */
+.gd-node-actions {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; align-items: center; gap: 4px;
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.gd-mermaid:hover .gd-node-actions,
+.gd-excalidraw:hover .gd-node-actions,
+.gd-drawio:hover .gd-node-actions,
+.gd-node-actions:focus-within { opacity: 1; }
+
+/* full-screen diagram viewer (zoom + pan) */
+.gd-lightbox {
+  display: flex; flex-direction: column; height: 100vh;
+  background: var(--mantine-color-body);
+}
+.gd-lightbox-bar {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.gd-lightbox-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-lightbox-viewport {
+  position: relative; flex: 1; overflow: hidden;
+  cursor: grab; touch-action: none;
+  background: var(--mantine-color-default);
+}
+.gd-lightbox-viewport:active { cursor: grabbing; }
+.gd-lightbox-content {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0; display: inline-block; user-select: none;
+}
+.gd-lightbox-content svg,
+.gd-lightbox-content img { display: block; max-width: none; height: auto; }
+
+/* ---------- document bar (PDF / PPTX attachment) ---------- */
+.gd-document {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  background: var(--mantine-color-default);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.gd-document:hover { background: var(--mantine-color-default-hover); }
+.gd-document.is-selected { border-color: var(--mantine-color-blue-5); }
+.gd-document-icon { flex: none; color: var(--mantine-color-dimmed); }
+.gd-document-meta { flex: 1; min-width: 0; }
+.gd-document-name { line-height: 1.3; }
+.gd-document-actions { flex: none; display: flex; gap: 4px; }
 .gd-page-topbar {
   position: sticky; top: 0; z-index: 100;
   background: var(--mantine-color-body);
@@ -316,9 +407,221 @@
 /* ---------- print ---------- */
 @media print {
   .mantine-AppShell-navbar, .gd-page-topbar, .gd-burger, .gd-savestate,
-  .gd-node-edit-btn, .gd-tree-actions { display: none !important; }
+  .gd-node-edit-btn, .gd-node-actions, .gd-tree-actions { display: none !important; }
   .mantine-AppShell-main { padding-left: 0 !important; }
   .gd-editor { min-height: 0; }
+}
+
+/* ---------- wiki page links ---------- */
+.gd-slash-item .gd-slash-icon { display: inline; font-size: 15px; line-height: 1; }
+
+.gd-pagelink-wrap { display: inline; }
+.gd-pagelink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0.05em 0.32em;
+  border-radius: 4px;
+  background: var(--mantine-color-blue-light);
+  color: var(--mantine-color-blue-7);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gd-pagelink:hover { background: var(--mantine-color-blue-light-hover); }
+/* A link written against a title that has no page yet — still readable, but
+   visibly waiting to be filled in. */
+.gd-pagelink.is-unresolved {
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  border: 1px dashed var(--mantine-color-default-border);
+  cursor: default;
+}
+.ProseMirror-selectednode .gd-pagelink,
+.gd-pagelink-wrap.ProseMirror-selectednode .gd-pagelink {
+  outline: 2px solid var(--mantine-color-blue-4);
+}
+
+/* ---------- page picker / backlinks rows ---------- */
+.gd-picker-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: var(--mantine-color-text);
+  text-decoration: none;
+}
+.gd-picker-item:hover { background: var(--mantine-color-default-hover); }
+
+.gd-backlinks-head {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  color: var(--mantine-color-text);
+}
+.gd-backlinks-head:hover { color: var(--mantine-color-blue-6); }
+
+@media print {
+  .gd-backlinks { display: none; }
+}
+
+/* ---- realtime collaboration ---- */
+
+/* Remote text caret. The colour arrives as --gd-peer-color, derived from the
+   peer's user id, so a caret is recognisable before the label is read. */
+.gd-remote-caret {
+  position: relative;
+  display: inline;
+  margin: 0 -1px;
+  pointer-events: none;
+  word-break: normal;
+}
+.gd-remote-caret__flag {
+  position: absolute;
+  top: -0.1em;
+  bottom: -0.15em;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--gd-peer-color);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.gd-remote-caret__label {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  margin-bottom: 1px;
+  padding: 1px 6px;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  user-select: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+/* Not typing: the name moves to their mouse pointer, so the caret goes quiet
+   rather than leaving a permanent badge over the text. */
+.gd-remote-caret.is-idle .gd-remote-caret__flag { opacity: 0.55; }
+.gd-remote-caret.is-idle .gd-remote-caret__label {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.gd-remote-selection { border-radius: 2px; }
+
+/* Miro-style mouse pointers, positioned in document coordinates. */
+.gd-pointer-layer {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 5;
+}
+.gd-pointer {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  /* The peer publishes ~20 positions a second; the transition fills the gaps
+     so the pointer glides instead of stepping. */
+  transition: left 90ms linear, top 90ms linear;
+  will-change: left, top;
+}
+.gd-pointer__arrow {
+  flex: none;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.3));
+}
+.gd-pointer__label {
+  margin-top: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+/* Presence avatars in the page top bar. */
+.gd-presence { margin-right: 8px; }
+.gd-presence__avatar {
+  margin-left: -6px;
+  border: 2px solid var(--mantine-color-body);
+  transition: transform 120ms ease;
+}
+.gd-presence__avatar:first-of-type { margin-left: 0; }
+.gd-presence__avatar.is-typing {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--gd-peer-color);
+}
+.gd-presence-status { margin-right: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gd-pointer { transition: none; }
+  .gd-remote-caret__label { transition: none; }
+}
+
+@media print {
+  .gd-pointer-layer,
+  .gd-remote-caret,
+  .gd-presence { display: none; }
+}
+
+/* ── Vim emulation ──────────────────────────────────────────────────────── */
+
+/* Normal mode sits *on* a character rather than between two, so the caret is
+   drawn as a block over the character under the cursor. */
+.gd-vim-block-cursor {
+  background: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+  border-radius: 1px;
+}
+.gd-editor.gd-vim-normal,
+.gd-editor.gd-vim-visual,
+.gd-editor.gd-vim-command { caret-color: transparent; }
+
+.gd-vim-status {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-dimmed);
+}
+.gd-vim-status.is-insert { color: var(--mantine-color-green-text); }
+.gd-vim-status.is-visual { color: var(--mantine-color-orange-text); }
+.gd-vim-status.is-command { color: var(--mantine-color-text); }
+.gd-vim-mode { font-weight: 700; }
+.gd-vim-pending { margin-left: auto; opacity: 0.75; }
+.gd-vim-message { opacity: 0.9; }
+.gd-vim-cmdline { display: inline-flex; align-items: center; }
+.gd-vim-cmdcaret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 1px;
+  background: currentColor;
+  animation: gd-vim-blink 1s steps(1) infinite;
+}
+@keyframes gd-vim-blink { 50% { opacity: 0; } }
+
+/* The tree cursor. Distinct from .is-active, which marks the page that is
+   actually open — with vim they are often two different rows. */
+.gd-tree:focus { outline: none; }
+.gd-tree.is-vim-focus { box-shadow: inset 2px 0 0 var(--mantine-color-blue-filled); }
+.gd-tree-row.is-vim-cursor {
+  background: var(--mantine-color-default-hover);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  border-radius: 4px;
 }
 
 /* ---- Find in page ---- */
@@ -348,4 +651,7 @@
 [data-mantine-color-scheme='dark'] .gd-find-match-active {
   background: var(--mantine-color-orange-7);
   box-shadow: 0 0 0 2px var(--mantine-color-orange-7);
+}
+@media print {
+  .gd-findbar { display: none; }
 }

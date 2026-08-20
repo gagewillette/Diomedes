@@ -29,10 +29,16 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 ### Auth & profile
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/auth/me` | Current user + workspace name + preferences |
+| GET | `/api/auth/me` | Current user + workspace name + workspace settings + preferences |
 | PATCH | `/api/auth/preferences` | `{preferences: {...}}` — user-scoped UI/editor prefs (≤8KB) |
 | PATCH | `/api/auth/profile` | `{name}` |
 | POST | `/api/auth/change-password` | `{current, next}` (session only) |
+
+### Workspace settings
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}}}` — any member |
+| PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
 
 ### API tokens (session only for creation)
 | Method | Path | Notes |
@@ -63,7 +69,7 @@ Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagra
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
 | PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning + search reindex |
-| POST | `/api/pages/:id/move` | `{parentId?, position?}` |
+| POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, position?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `position` is the older explicit sort key. |
 | DELETE | `/api/pages/:id` | Soft-delete subtree (trash) |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |
@@ -82,7 +88,7 @@ Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagra
 ### Files
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}` |
+| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}`. 403 when workspace file uploads are off |
 | GET | `/api/files/:id/:filename` | Auth or public-if-page-shared |
 
 ## MCP server sketch

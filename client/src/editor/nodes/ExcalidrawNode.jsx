@@ -1,8 +1,10 @@
 import { Node } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Button, Modal, Group, Loader, Center, Text } from '@mantine/core';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { ActionIcon, Button, Modal, Group, Loader, Center, Text, Tooltip } from '@mantine/core';
 import { useComputedColorScheme } from '@mantine/core';
+import { IconZoomScan } from '@tabler/icons-react';
+import { DiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 
 const ExcalidrawCanvas = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({
@@ -21,6 +23,7 @@ const ExcalidrawCanvas = lazy(() =>
 
 function ExcalidrawView({ node, updateAttributes, editor, selected }) {
   const [open, setOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const previewRef = useRef(null);
   const apiRef = useRef(null);
   const colorScheme = useComputedColorScheme('light');
@@ -35,17 +38,22 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const exportSvg = useCallback(async () => {
+    const { exportToSvg } = await import('@excalidraw/excalidraw');
+    const scene = node.attrs.data || { elements: [], appState: {}, files: {} };
+    return exportToSvg({
+      elements: scene.elements || [],
+      appState: { ...scene.appState, exportBackground: true, exportWithDarkMode: colorScheme === 'dark' },
+      files: scene.files || {},
+    });
+  }, [node.attrs.data, colorScheme]);
+
   useEffect(() => {
     let cancelled = false;
     if (!hasContent || !previewRef.current) return;
     (async () => {
-      const { exportToSvg } = await import('@excalidraw/excalidraw');
       try {
-        const svg = await exportToSvg({
-          elements: data.elements,
-          appState: { ...data.appState, exportBackground: true, exportWithDarkMode: colorScheme === 'dark' },
-          files: data.files || {},
-        });
+        const svg = await exportSvg();
         if (cancelled || !previewRef.current) return;
         svg.style.maxWidth = '100%';
         svg.style.height = 'auto';
@@ -78,24 +86,46 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
     close();
   };
 
+  const zoomHandlers = useZoomClickHandlers({
+    editable: editor.isEditable,
+    onZoom: () => setZoomOpen(true),
+    onEdit: () => setOpen(true),
+  });
+
   return (
     <NodeViewWrapper className={`gd-excalidraw ${selected ? 'is-selected' : ''}`} contentEditable={false}>
       {hasContent ? (
-        <div
-          ref={previewRef}
-          className="gd-excalidraw-preview"
-          onDoubleClick={() => editor.isEditable && setOpen(true)}
-        />
+        <div ref={previewRef} className="gd-excalidraw-preview" {...zoomHandlers} />
       ) : (
         <div className="gd-excalidraw-empty" onDoubleClick={() => editor.isEditable && setOpen(true)}>
           <Text c="dimmed" size="sm">Empty drawing{editor.isEditable ? ' — double-click to draw' : ''}</Text>
         </div>
       )}
-      {editor.isEditable && (
-        <Button size="compact-xs" variant="light" className="gd-node-edit-btn" onClick={() => setOpen(true)}>
-          Edit drawing
-        </Button>
-      )}
+      <div className="gd-node-actions">
+        {hasContent && (
+          <Tooltip label="Open full screen">
+            <ActionIcon
+              size="sm"
+              variant="light"
+              aria-label="Open drawing full screen"
+              onClick={() => setZoomOpen(true)}
+            >
+              <IconZoomScan size={14} />
+            </ActionIcon>
+          </Tooltip>
+        )}
+        {editor.isEditable && (
+          <Button size="compact-xs" variant="light" onClick={() => setOpen(true)}>
+            Edit drawing
+          </Button>
+        )}
+      </div>
+      <DiagramLightbox
+        opened={zoomOpen}
+        onClose={() => setZoomOpen(false)}
+        title="Drawing"
+        renderNode={exportSvg}
+      />
       <Modal
         opened={open}
         onClose={save}

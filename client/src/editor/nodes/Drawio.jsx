@@ -1,12 +1,15 @@
 import { Node } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
-import { Button, Modal, Text, useComputedColorScheme } from '@mantine/core';
+import { ActionIcon, Button, Modal, Text, Tooltip, useComputedColorScheme } from '@mantine/core';
+import { IconZoomScan } from '@tabler/icons-react';
+import { DiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 
 const DRAWIO_ORIGIN = 'https://embed.diagrams.net';
 
 function DrawioView({ node, updateAttributes, editor, selected }) {
   const [open, setOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const iframeRef = useRef(null);
   const xmlRef = useRef(node.attrs.xml);
   const colorScheme = useComputedColorScheme('light');
@@ -51,12 +54,18 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     return () => window.removeEventListener('message', onMessage);
   }, [open, node.attrs.xml, updateAttributes]);
 
+  const zoomHandlers = useZoomClickHandlers({
+    editable: editor.isEditable,
+    onZoom: () => setZoomOpen(true),
+    onEdit: () => setOpen(true),
+  });
+
   const src = `${DRAWIO_ORIGIN}/?embed=1&proto=json&spin=1&ui=${colorScheme === 'dark' ? 'dark' : 'atlas'}&saveAndExit=1&noSaveBtn=0&noExitBtn=0`;
 
   return (
     <NodeViewWrapper className={`gd-drawio ${selected ? 'is-selected' : ''}`} contentEditable={false}>
       {node.attrs.svg ? (
-        <div className="gd-drawio-preview" onDoubleClick={() => editor.isEditable && setOpen(true)}>
+        <div className="gd-drawio-preview" {...zoomHandlers}>
           <img src={node.attrs.svg} alt="draw.io diagram" />
         </div>
       ) : (
@@ -66,11 +75,31 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
           </Text>
         </div>
       )}
-      {editor.isEditable && (
-        <Button size="compact-xs" variant="light" className="gd-node-edit-btn" onClick={() => setOpen(true)}>
-          Edit diagram
-        </Button>
-      )}
+      <div className="gd-node-actions">
+        {node.attrs.svg && (
+          <Tooltip label="Open full screen">
+            <ActionIcon
+              size="sm"
+              variant="light"
+              aria-label="Open diagram full screen"
+              onClick={() => setZoomOpen(true)}
+            >
+              <IconZoomScan size={14} />
+            </ActionIcon>
+          </Tooltip>
+        )}
+        {editor.isEditable && (
+          <Button size="compact-xs" variant="light" onClick={() => setOpen(true)}>
+            Edit diagram
+          </Button>
+        )}
+      </div>
+      <DiagramLightbox
+        opened={zoomOpen}
+        onClose={() => setZoomOpen(false)}
+        title="draw.io diagram"
+        src={node.attrs.svg}
+      />
       <Modal
         opened={open}
         onClose={close}

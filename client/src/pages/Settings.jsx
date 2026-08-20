@@ -10,7 +10,9 @@ import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { FONT_LABELS, FONT_STACKS } from '../lib/prefs.js';
+import {
+  FONT_LABELS, FONT_STACKS, KEYMAP_LABELS, VIM_CHALLENGE, isVimQuitAnswer,
+} from '../lib/prefs.js';
 
 export default function Settings() {
   const { user, refresh, preferences, updatePreferences } = useAuth();
@@ -100,6 +102,7 @@ export default function Settings() {
             checked={preferences.smoothCaret}
             onChange={(e) => savePref({ smoothCaret: e.currentTarget.checked })}
           />
+          <KeymapSetting value={preferences.keymap} onChange={(keymap) => savePref({ keymap })} />
           <Switch
             label="Interface animations"
             description="Fades, sidebar transitions and hover effects"
@@ -252,5 +255,94 @@ function ApiTokens() {
         )}
       </Modal>
     </Paper>
+  );
+}
+
+/**
+ * Emulation type. Turning vim on asks the one question that separates people
+ * who want modal editing from people who are about to be trapped in it — get
+ * it wrong and the setting does not change.
+ */
+function KeymapSetting({ value, onChange }) {
+  const [askOpen, askHandlers] = useDisclosure(false);
+  const [answer, setAnswer] = useState('');
+  const [wrong, setWrong] = useState(0);
+
+  const openChallenge = () => {
+    setAnswer('');
+    setWrong(0);
+    askHandlers.open();
+  };
+
+  const submit = () => {
+    if (!isVimQuitAnswer(answer)) {
+      setWrong((n) => n + 1);
+      return;
+    }
+    askHandlers.close();
+    onChange('vim');
+    notifications.show({ color: 'green', message: 'Vim bindings enabled — the editor starts in normal mode.' });
+  };
+
+  return (
+    <div>
+      <Select
+        label="Keyboard emulation"
+        description="Vim gives the document modal editing and the page tree j/k navigation."
+        data={Object.entries(KEYMAP_LABELS).map(([v, label]) => ({ value: v, label }))}
+        value={value}
+        onChange={(v) => {
+          if (!v || v === value) return;
+          if (v === 'vim') openChallenge();
+          else onChange(v);
+        }}
+        allowDeselect={false}
+      />
+
+      {value === 'vim' && (
+        <Paper withBorder p="sm" radius="md" mt="sm">
+          <Text size="xs" fw={700} mb={6}>Vim bindings</Text>
+          <Stack gap={4}>
+            <Text size="xs" c="dimmed">
+              <Code>Ctrl+H</Code> / <Code>Ctrl+L</Code> — jump to the page tree / back to the editor
+            </Text>
+            <Text size="xs" c="dimmed">
+              Page tree: <Code>j</Code> <Code>k</Code> walk every page (a parent opens as you reach
+              it), <Code>{'{'}</Code> <Code>{'}'}</Code> jump between top-level pages,{' '}
+              <Code>Enter</Code> opens the page
+            </Text>
+            <Text size="xs" c="dimmed">
+              Document: <Code>h j k l w b e 0 ^ $ gg G</Code>, operators <Code>d c y</Code>,{' '}
+              <Code>x p P u Ctrl+R</Code>, insert with <Code>i a I A o O</Code>, select with{' '}
+              <Code>v</Code>, and <Code>:w</Code> <Code>:q</Code>
+            </Text>
+          </Stack>
+        </Paper>
+      )}
+
+      <Modal opened={askOpen} onClose={askHandlers.close} title="One question first">
+        <Stack>
+          <Text size="sm">{VIM_CHALLENGE}</Text>
+          <TextInput
+            data-autofocus
+            placeholder="Type the command"
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+            error={wrong > 0 ? 'Not quite — that would not get you out.' : null}
+          />
+          {wrong > 1 && (
+            <Alert color="yellow" p="xs">
+              Hint: an ex command, starting with a colon, ending with the character that
+              means “I mean it”.
+            </Alert>
+          )}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={askHandlers.close}>Cancel</Button>
+            <Button onClick={submit} disabled={!answer.trim()}>Enable vim</Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </div>
   );
 }

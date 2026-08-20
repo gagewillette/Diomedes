@@ -6,8 +6,16 @@ shipped as a single versioned Docker image.
 
 **Editor**: markdown paste with auto-formatting, markdown typing shortcuts, slash
 commands, Word-style smooth caret, tables, task lists, syntax-highlighted code, KaTeX
-math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads — and three
-integrated diagram editors: **Mermaid**, **Excalidraw**, and **Draw.io**.
+math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads,
+**PDF and PowerPoint documents** — and three integrated diagram editors:
+**Mermaid**, **Excalidraw**, and **Draw.io**.
+
+**Live collaboration**: several people edit the same page at once, backed by a Yjs
+CRDT over a websocket. You see a colleague's **text caret** while they type and their
+**mouse pointer**, Miro-style, while they read or select — with a colour derived from
+their user id, so the same person is the same colour for everyone. See
+[docs/realtime-collaboration.md](docs/realtime-collaboration.md) for the design and
+the concurrency reasoning behind it.
 
 **Organization**: spaces with nested page trees, full-text search (optionally
 **semantic** — see below), favorites, page
@@ -57,7 +65,29 @@ data at fixed paths (this is what the author's server does):
 |---|---|
 | `/mnt/storage/diomedes/db` | PostgreSQL data |
 | `/mnt/storage/diomedes/redis` | Redis persistence (sessions survive restarts) |
-| `/mnt/storage/diomedes/app-data` | Uploaded files/attachments |
+| `/mnt/storage/diomedes/app-data` | Uploaded files/attachments (documents under `users/<user-id>/`) |
+
+## Documents (PDF / PowerPoint)
+
+Type `/document`, or drag a file into the page and it lands where you dropped it.
+Either way you get a bar on its own line: the filename on the left, download and
+view buttons on the right.
+
+- **PDF** — stored as uploaded. *View* opens it in a new tab, where Chrome's
+  built-in PDF viewer renders it. There is no in-app viewer to go wrong.
+- **PPTX** — you choose on upload whether to keep the original PowerPoint or
+  convert it to PDF. Converting happens on the server at upload time, and only
+  the PDF is stored. A stored PPTX can be downloaded but never viewed in the
+  browser, so its *View* button is disabled.
+
+Documents are stored under `<storage>/users/<user-id>/`, separate from the
+per-space layout used by inline images and video. Access is still checked
+against the owning page's space, or its public share link.
+
+Conversion shells out to LibreOffice, which the app image installs. Running the
+server directly on a host without LibreOffice is fine — the editor detects it,
+disables the PDF option, and keeps the PPTX as-is. See `SOFFICE_PATH` in
+`.env.example`.
 
 ## Semantic search (optional)
 
