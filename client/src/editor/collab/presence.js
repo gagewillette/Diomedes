@@ -61,7 +61,7 @@ export function usePeers(session) {
   return peers;
 }
 
-export function usePresence({ session, editor, me, wrapRef, canWrite }) {
+export function usePresence({ session, editor, me, wrapRef, canWrite, pointers = true }) {
   const peers = usePeers(session);
   const modeRef = useRef('pointing');
   const typingTimer = useRef(null);
@@ -118,9 +118,17 @@ export function usePresence({ session, editor, me, wrapRef, canWrite }) {
   }, [peers, wrapRef]);
 
   // ---- pointer tracking ----
+  // With live pointers turned off for the workspace nothing is published at all:
+  // this is the chattiest thing on the wire (~20 messages a second per person),
+  // so the saving has to come from not sending, not from not drawing.
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap || !awareness) return undefined;
+    if (!pointers) {
+      // Clear whatever was last published, so peers stop showing a stale arrow.
+      awareness.setLocalStateField('pointer', null);
+      return undefined;
+    }
 
     const pending = scheduleRef.current;
 
@@ -185,7 +193,7 @@ export function usePresence({ session, editor, me, wrapRef, canWrite }) {
       window.removeEventListener('scroll', onScrollOrResize, true);
       window.removeEventListener('resize', onScrollOrResize);
     };
-  }, [awareness, wrapRef]);
+  }, [awareness, wrapRef, pointers]);
 
   return peers;
 }

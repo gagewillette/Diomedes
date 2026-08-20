@@ -8,6 +8,7 @@ import { q } from '../db.js';
 import { asyncRoute, httpError } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, spaceRole, getPage, resolveUser } from '../lib/auth.js';
 import { convertToPdf, pdfConversionAvailable } from '../lib/convert.js';
+import { uploadsEnabled, getWorkspace } from '../lib/workspace.js';
 import { PDF_MIME, docTypeFor, inlineAllowed } from '../lib/doctypes.js';
 
 export const STORAGE_PATH = process.env.STORAGE_PATH || path.resolve(process.cwd(), 'data/storage');
@@ -44,11 +45,22 @@ const fileUrls = (att) => {
   return { url: base, downloadUrl: `${base}?download=1` };
 };
 
+// Data-savings gate for new uploads. It runs *before* multer so a rejected file
+// is never written to disk. Existing attachments are untouched: the download and
+// inline-view routes below stay open whatever this flag says.
+const requireUploadsEnabled = asyncRoute(async (_req, _res, next) => {
+  if (!(await uploadsEnabled())) {
+    throw httpError(403, 'File uploads are turned off for this workspace');
+  }
+  next();
+});
+
 const router = Router();
 
 router.post(
   '/pages/:id/attachments',
   requireAuth,
+  requireUploadsEnabled,
   upload.single('file'),
   asyncRoute(async (req, res) => {
     if (!req.file) throw httpError(400, 'No file uploaded');
@@ -93,6 +105,7 @@ router.get(
 router.post(
   '/pages/:id/documents',
   requireAuth,
+  requireUploadsEnabled,
   upload.single('file'),
   asyncRoute(async (req, res) => {
     if (!req.file) throw httpError(400, 'No file uploaded');
@@ -197,8 +210,8 @@ router.get(
       [req.params.token]
     );
     if (!rows[0]) throw httpError(404, 'This link is invalid or has been revoked');
-    const { rows: ws } = await q("SELECT value FROM settings WHERE key = 'workspace'");
-    res.json({ page: rows[0], workspaceName: ws[0]?.value?.name || 'Diomedes' });
+    const workspace = await getWorkspace();
+    res.json({ page: rows[0], workspaceName: workspace.name });
   })
 );
 

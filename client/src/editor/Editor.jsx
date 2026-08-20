@@ -116,6 +116,18 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
   ];
 }
 
+/**
+ * Said once per attempt, wherever a file tries to get in while the workspace has
+ * uploads switched off. Deliberately names the setting: the person who hit it is
+ * usually not the admin who turned it off.
+ */
+function notifyUploadsOff() {
+  notifications.show({
+    color: 'yellow',
+    message: 'File uploads are turned off for this workspace (Workspace settings → Data savings).',
+  });
+}
+
 /** documentBlock attrs from a POST /pages/:id/documents response. */
 export const documentAttrs = (res) => ({
   attachmentId: res.attachment.id,
@@ -137,10 +149,23 @@ export default function Editor({
   me = null,
   onSaveState,
 }) {
-  const { preferences } = useAuth();
+  const { preferences, dataSavings } = useAuth();
   const wrapRef = useRef(null);
+  // Workspace data savings: with uploads off, no new file gets in — no slash
+  // command, no drop, no paste. Files already in the document keep rendering.
+  const uploadsAllowed = dataSavings.fileUploads;
+  // Slash items live inside extensions, which the editor holds on to; the ref
+  // means a toggle takes effect immediately even if the list is still the one
+  // built before uploads were switched off.
+  const uploadsAllowedRef = useRef(uploadsAllowed);
+  uploadsAllowedRef.current = uploadsAllowed;
+
   const uploadFile = pageId
     ? async (file) => {
+        if (!uploadsAllowedRef.current) {
+          notifyUploadsOff();
+          return null;
+        }
         try {
           const fd = new FormData();
           fd.append('file', file);
@@ -153,12 +178,20 @@ export default function Editor({
       }
     : null;
 
-  const { uploadDocument, prompt: documentPrompt } = useDocumentUpload(editable ? pageId : null);
+  const { uploadDocument, prompt: documentPrompt } = useDocumentUpload(
+    editable && uploadsAllowed ? pageId : null
+  );
   // The editor's extensions are built once, so reach the current callback
   // through a ref rather than baking in the one from the first render.
   const uploadDocumentRef = useRef(uploadDocument);
   uploadDocumentRef.current = uploadDocument;
-  const uploadDocumentStable = useCallback((file) => uploadDocumentRef.current?.(file) ?? null, []);
+  const uploadDocumentStable = useCallback((file) => {
+    if (!uploadsAllowedRef.current) {
+      notifyUploadsOff();
+      return null;
+    }
+    return uploadDocumentRef.current?.(file) ?? null;
+  }, []);
 
   // The [[link]] suggestion plugin runs outside React, so hand it the current
   // space through the module-level context before the editor can be typed in.
@@ -172,13 +205,13 @@ export default function Editor({
     () =>
       buildExtensions({
         uploadFile,
-        uploadDocument: pageId && editable ? uploadDocumentStable : null,
+        uploadDocument: pageId && editable && uploadsAllowed ? uploadDocumentStable : null,
         collab,
         me,
       }),
     // ydoc/provider identity, not the session object: the session re-wraps on
     // every connection-status change and rebuilding the list would be pointless.
-    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadDocumentStable] // eslint-disable-line react-hooks/exhaustive-deps
+    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadsAllowed, uploadDocumentStable] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const editor = useEditor({
@@ -194,7 +227,12 @@ export default function Editor({
       // comment there for why ProseMirror's own drop path can't be trusted
       // with files.
       handlePaste: (_view, event) => {
-        if (!uploadFile || !event.clipboardData?.files?.length) return false;
+        if (!event.clipboardData?.files?.length) return false;
+        if (!uploadsAllowed) {
+          notifyUploadsOff();
+          return true;
+        }
+        if (!uploadFile) return false;
         handleFiles(Array.from(event.clipboardData.files));
         return true;
       },
@@ -223,7 +261,7 @@ export default function Editor({
     for (const file of files) {
       // A PDF or PPTX becomes a document card — the same one /document makes.
       if (docKindFor(file)) {
-        const res = await uploadDocumentRef.current?.(file);
+        const res = await uploadDocumentStable(file);
         if (!res) continue;
         at = insertDocument(at, res);
       } else if (uploadFile) {
@@ -271,7 +309,15 @@ export default function Editor({
     return end;
   }
 
-  const peers = usePresence({ session: collab, editor, me, wrapRef, canWrite: editable });
+  const livePointers = dataSavings.livePointers;
+  const peers = usePresence({
+    session: collab,
+    editor,
+    me,
+    wrapRef,
+    canWrite: editable,
+    pointers: livePointers,
+  });
   useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
   useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
 
@@ -279,8 +325,11 @@ export default function Editor({
 
   const { ref: dropRef, isOver } = useFileDrop({
     editor,
-    enabled: Boolean(editor && editable && pageId),
+    enabled: Boolean(editor && editable && pageId && uploadsAllowed),
     onFiles: handleFiles,
+    onBlocked: () => {
+      if (editable && pageId && !uploadsAllowed) notifyUploadsOff();
+    },
   });
 
   return (
@@ -299,7 +348,7 @@ export default function Editor({
       {editable && <BubbleToolbar editor={editor} />}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
-      {collab && <PointerLayer peers={peers} />}
+      {collab && livePointers && <PointerLayer peers={peers} />}
       {editable && documentPrompt}
     </div>
   );
