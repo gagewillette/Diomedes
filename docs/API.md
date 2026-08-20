@@ -121,6 +121,7 @@ document with ids stripped makes every block look new. See
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
 | PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex. Sent with an API token (MCP, scripts) it also drops the page's collaborative document, so the next reader rebuilds it from the JSON just written instead of being served the pre-write CRDT |
+| GET | `/api/pages/:id/subtree?content=1` | The page and every live page beneath it, at any depth, ordered by `order_key`. Reader access is enough — this is what "Export as ZIP" walks. `content=1` includes each page's body; without it only the tree. Trashed pages, and anything beneath them, are left out |
 | GET | `/api/pages/:id/blocks` | `{rev, blocks[]}` — the page's blocks in document order |
 | GET | `/api/pages/:id/delta?since=N` | What changed since revision `N`: `{rev, full, blocks[], deleted[], order[]}`. `full: true` means the gap is too wide to answer incrementally — refetch the page. |
 | POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, orderKey?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `orderKey` is an explicit sort key for clients that compute one. A numeric `position` is still accepted and read as a slot index. |
