@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 
 // Delay before the elected writer pushes a JSON snapshot. Long enough that a
@@ -7,6 +7,11 @@ import { api } from '../../lib/api.js';
 // on the server).
 const SNAPSHOT_DEBOUNCE_MS = 2500;
 
+// A little longer than the server's seed lease (SEED_LEASE_SEC in
+// server/src/routes/pages.js): how long a client that was refused the claim
+// waits before deciding the holder is not coming back.
+const SEED_RETRY_MS = 16_000;
+
 const isEmptyDoc = (doc) =>
   !doc ||
   !Array.isArray(doc.content) ||
@@ -14,6 +19,23 @@ const isEmptyDoc = (doc) =>
   (doc.content.length === 1 &&
     doc.content[0].type === 'paragraph' &&
     !doc.content[0].content?.length);
+
+/**
+ * Did the seed actually reach the collaborative document?
+ *
+ * Reporting a seed is what retires the page's one and only claim, so the answer
+ * has to come from the document rather than from having called setContent a
+ * moment ago. An editor torn down mid-seed — a page switch, a closed tab — has
+ * left nothing behind, and saying otherwise strands the page empty for good.
+ */
+export const seedLanded = (editor, ydoc) =>
+  Boolean(
+    editor &&
+      !editor.isDestroyed &&
+      ydoc &&
+      !ydoc.isDestroyed &&
+      ydoc.getXmlFragment('default').length > 0
+  );
 
 /**
  * Convert the page's stored JSON into the CRDT, once, on first ever open.
@@ -25,6 +47,10 @@ const isEmptyDoc = (doc) =>
  */
 export function useSeedContent({ session, editor, pageId, initialContent, canWrite }) {
   const attempted = useRef(false);
+  const retry = useRef(null);
+  // Bumped when a refused claim is worth looking at again; the effect below
+  // reads it only to be re-run.
+  const [round, setRound] = useState(0);
   const synced = session?.synced;
   const ydoc = session?.ydoc;
 
@@ -38,11 +64,22 @@ export function useSeedContent({ session, editor, pageId, initialContent, canWri
     (async () => {
       try {
         const { granted, content } = await api.post(`/api/pages/${pageId}/collab/claim-seed`);
-        if (!granted || editor.isDestroyed) return;
+        if (editor.isDestroyed) return;
+        if (!granted) {
+          // Someone else holds the claim. Usually they finish and their update
+          // syncs here, which the guard above then sees. But a client that took
+          // the claim and died still holds it until the lease runs out, and
+          // this is the only code that will ever fill the CRDT — so look again
+          // once it has, rather than leaving the page blank for good.
+          attempted.current = false;
+          retry.current = setTimeout(() => setRound((n) => n + 1), SEED_RETRY_MS);
+          return;
+        }
         // Re-check: the grant is asynchronous, and the winner's update may have
         // landed while this request was in flight.
         if (ydoc.getXmlFragment('default').length > 0) return;
         editor.commands.setContent(content ?? initialContent, false);
+        if (!seedLanded(editor, ydoc)) return; // let the lease expire instead
         await api.post(`/api/pages/${pageId}/collab/confirm-seed`);
       } catch {
         // A failed seed is recoverable: the claim lease expires and the next
@@ -50,7 +87,9 @@ export function useSeedContent({ session, editor, pageId, initialContent, canWri
         attempted.current = false;
       }
     })();
-  }, [synced, ydoc, editor, pageId, initialContent, canWrite]);
+  }, [synced, ydoc, editor, pageId, initialContent, canWrite, round]);
+
+  useEffect(() => () => clearTimeout(retry.current), []);
 }
 
 /**

@@ -32,7 +32,7 @@ export default function PageEditor() {
   const { pageId, slug } = useParams();
   const { preferences, user } = useAuth();
   const navigate = useNavigate();
-  const [data, setData] = useState(null);
+  const [loaded, setLoaded] = useState(null);
   const [title, setTitle] = useState('');
   const [saveState, setSaveState] = useState('saved'); // saved | saving | error
   const [shareToken, setShareToken] = useState(null);
@@ -46,11 +46,24 @@ export default function PageEditor() {
   const titleTimer = useRef(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // The page in hand, but only for as long as it is the page the URL names.
+  //
+  // `load()` clears the previous page from inside an effect, which runs a
+  // render *after* the route changed — so for exactly one render the new page
+  // id was paired with the previous page's document. Everything below acted on
+  // that mismatch: the editor mounted with the wrong body, and the collab
+  // session built alongside it claimed the *new* page's one-shot content seed
+  // and spent it on a document that was about to be thrown away. The page
+  // stayed marked as seeded with nothing in its CRDT, and opened blank from
+  // then on. Deriving the pairing here makes "this data belongs to this page"
+  // a property of the render rather than of when a fetch happens to resolve.
+  const data = loaded?.page.id === pageId ? loaded : null;
+
   const load = useCallback(async () => {
-    setData(null);
+    setLoaded(null);
     try {
       const d = await api.get(`/api/pages/${pageId}`);
-      setData(d);
+      setLoaded(d);
       setTitle(d.page.title);
       setShareToken(d.page.share_token);
       setIsFavorite(d.isFavorite);
@@ -196,7 +209,7 @@ export default function PageEditor() {
     const icon = window.prompt('Page icon (emoji, empty to clear)', data.page.icon || '');
     if (icon === null) return;
     api.patch(`/api/pages/${pageId}`, { title, icon }).then(() => {
-      setData((d) => ({ ...d, page: { ...d.page, icon } }));
+      setLoaded((d) => ({ ...d, page: { ...d.page, icon } }));
       emitPagesChanged(data.page.space_id);
     });
   };

@@ -105,9 +105,16 @@ const textOf = (node) =>
     .map((child) => (typeof child.text === 'string' ? child.text : ''))
     .join('');
 
-const toDiagram = (code) => ({ type: 'mermaidDiagram', attrs: { code } });
+// The block keeps its identity across the swap — it is the same block, and a
+// diagram that came out of here with a fresh name every save would be reported
+// as changed and re-embedded on every save. Mirrors client/src/lib/diagramBlocks.js.
+const keepId = (node) => (node.attrs?.blockId ? { blockId: node.attrs.blockId } : {});
+const toDiagram = (node, code) => ({ type: 'mermaidDiagram', attrs: { ...keepId(node), code } });
 // The preview is rendered by the client on first view; only the XML is stored.
-const toDrawio = (xml) => ({ type: 'drawioDiagram', attrs: { xml: xml.trim(), svg: '' } });
+const toDrawio = (node, xml) => ({
+  type: 'drawioDiagram',
+  attrs: { ...keepId(node), xml: xml.trim(), svg: '' },
+});
 
 function normalizeNode(node) {
   if (!node || typeof node !== 'object') return node;
@@ -115,20 +122,20 @@ function normalizeNode(node) {
   if (node.type === 'codeBlock') {
     const code = textOf(node);
     const language = node.attrs?.language;
-    if (isMermaidLanguage(language)) return toDiagram(code);
-    if (isDrawioLanguage(language)) return toDrawio(code);
-    if (!language && looksLikeMermaid(code)) return toDiagram(code);
-    if (!language && looksLikeDrawio(code)) return toDrawio(code);
+    if (isMermaidLanguage(language)) return toDiagram(node, code);
+    if (isDrawioLanguage(language)) return toDrawio(node, code);
+    if (!language && looksLikeMermaid(code)) return toDiagram(node, code);
+    if (!language && looksLikeDrawio(code)) return toDrawio(node, code);
     return node;
   }
 
   // A diagram whose source was put in the node's text instead of attrs.code
   // renders empty. Lift it rather than lose it.
   if (node.type === 'mermaidDiagram' && !node.attrs?.code && node.content?.length) {
-    return toDiagram(textOf(node));
+    return toDiagram(node, textOf(node));
   }
   if (node.type === 'drawioDiagram' && !node.attrs?.xml && node.content?.length) {
-    return toDrawio(textOf(node));
+    return toDrawio(node, textOf(node));
   }
 
   if (!Array.isArray(node.content)) return node;

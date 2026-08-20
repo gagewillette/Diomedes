@@ -170,10 +170,19 @@ The right to seed is therefore arbitrated by a single conditional `UPDATE`
 everyone else waits for the resulting update to sync to them normally. The claim
 is a **lease**, not a flag: a client that wins it and then dies would otherwise
 strand the page at an empty document forever, so the claim expires after 15
-seconds and the next client retries. A separate confirm call retires it for good.
-A `NOT EXISTS` guard against `page_ydoc` closes the other end: once any CRDT state
-has been persisted, seeding can never fire again — without it, deleting every word
-on a page would make it look unseeded and resurrect the old text.
+seconds and the next client retries — including the one that was refused, which
+looks again once the lease it lost to has run out. A `NOT EXISTS` guard against
+`page_ydoc` closes the other end: once any CRDT state has been persisted, seeding
+can never fire again — without it, deleting every word on a page would make it
+look unseeded and resurrect the old text.
+
+That guard is also the *only* thing that ends seeding. There is a confirm call,
+and a `collab_seeded` flag it sets, but neither gates the claim: they record what
+a client said it did, and a client can say it and be gone before the text ever
+left the browser. Gating on the flag gave the page a terminal state — marked
+seeded, CRDT empty, blank for everyone forever — which is exactly what a batch
+import used to walk into. Asking for the persisted document instead means an
+unfinished seed simply expires and is picked up by whoever opens the page next.
 
 **Snapshot writes.** `pages.content` still backs search, version history, markdown
 export, the public share view and the REST API. If every client wrote it back,
