@@ -1,0 +1,11 @@
+name: CI
+
+# Required status check for branch protection on staging and main: a PR
+# cannot merge into either branch until this is green.
+on:
+  pull_request:
+    branches: [staging, main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/tests.yml

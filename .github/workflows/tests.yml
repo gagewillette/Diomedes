@@ -1,0 +1,80 @@
+name: Tests
+
+# Reusable test job. Called by ci.yml (PR gate for staging/main) and by the
+# staging/main publish workflows (defense in depth against a direct push that
+# bypasses branch protection).
+on:
+  workflow_call:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    services:
+      # Ephemeral, network-isolated to this job — trust auth (no password) is
+      # fine here and keeps secret scanners from flagging a fake credential
+      # that was never a secret.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: diomedes_test
+          POSTGRES_USER: diomedes
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U diomedes -d diomedes_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server deps
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+
+      # test/vimWords.test.js pins the vim word-motion logic straight from
+      # client/src/editor/vim/VimMode.js, which imports @tiptap/core — so the
+      # client's node_modules has to exist even though this is the server job.
+      - name: Install client deps
+        working-directory: client
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit tests
+        working-directory: server
+        run: npm test
+
+      - name: Integration tests
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://diomedes@localhost:5432/diomedes_test
+        run: npm run test:integration
+
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install deps
+        working-directory: client
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit tests
+        working-directory: client
+        run: npm test
+
+      - name: Build
+        working-directory: client
+        run: npm run build
