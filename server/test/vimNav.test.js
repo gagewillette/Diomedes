@@ -108,11 +108,16 @@ test('with no cursor, movement starts from the nearest end', () => {
 
 test('vim is off until someone answers the quit question', () => {
   assert.equal(DEFAULT_PREFS.keymap, 'default');
-  for (const good of [':q!', 'q!', ' :Q! ', ':qa!', ':qall!', ':quit!', 'ZQ', 'zq']) {
-    assert.equal(isVimQuitAnswer(good), true, `${good} should be accepted`);
+  // The question is how you quit, so the bang is optional: ':q' is the answer
+  // most people give and it is not wrong.
+  const good = [
+    ':q', 'q', ':q!', 'q!', ' :Q! ', ':qa', ':qa!', ':qall!', ':quit', ':quit!',
+    ':wq', ':x', ':x!', 'ZQ', 'zq', 'ZZ',
+  ];
+  for (const answer of good) {
+    assert.equal(isVimQuitAnswer(answer), true, `${answer} should be accepted`);
   }
-  // :q and :wq do not get you out of a modified buffer, and ZZ saves.
-  for (const bad of [':q', 'q', ':wq', 'ZZ', '', null, undefined, 'quit', ':x!', 'esc']) {
+  for (const bad of ['', null, undefined, 'esc', ':w', 'ctrl-c', 'i', ':help']) {
     assert.equal(isVimQuitAnswer(bad), false, `${JSON.stringify(bad)} should be rejected`);
   }
 });

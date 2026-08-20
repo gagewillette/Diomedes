@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Container, Title, Paper, TextInput, PasswordInput, Button, Stack, Text, Select,
   Slider, SegmentedControl, Switch, Group, Table, ActionIcon, Modal, Code, CopyButton,
-  Tooltip, Alert,
+  Tooltip, Alert, Badge,
 } from '@mantine/core';
 import { IconTrash, IconCopy, IconCheck, IconPlugConnected } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
@@ -287,8 +287,15 @@ function KeymapSetting({ value, onChange }) {
   return (
     <div>
       <Select
-        label="Keyboard emulation"
-        description="Vim gives the document modal editing and the page tree j/k navigation."
+        label={(
+          <Group gap={8} align="center" wrap="nowrap">
+            <span>Keyboard emulation</span>
+            <Badge color="red" variant="filled" size="xs" radius="xl">
+              Experimental Feature
+            </Badge>
+          </Group>
+        )}
+        description="Vim gives the document modal editing and the page tree j/k navigation. It covers most of vim, not all of it — expect rough edges."
         data={Object.entries(KEYMAP_LABELS).map(([v, label]) => ({ value: v, label }))}
         value={value}
         onChange={(v) => {
@@ -301,7 +308,12 @@ function KeymapSetting({ value, onChange }) {
 
       {value === 'vim' && (
         <Paper withBorder p="sm" radius="md" mt="sm">
-          <Text size="xs" fw={700} mb={6}>Vim bindings</Text>
+          <Group gap={8} align="center" mb={6}>
+            <Text size="xs" fw={700}>Vim bindings</Text>
+            <Badge color="red" variant="filled" size="xs" radius="xl">
+              Experimental Feature
+            </Badge>
+          </Group>
           <Stack gap={4}>
             <Text size="xs" c="dimmed">
               <Code>Ctrl+H</Code> / <Code>Ctrl+L</Code> — jump to the page tree / back to the editor
@@ -312,9 +324,19 @@ function KeymapSetting({ value, onChange }) {
               <Code>Enter</Code> opens the page
             </Text>
             <Text size="xs" c="dimmed">
-              Document: <Code>h j k l w b e 0 ^ $ gg G</Code>, operators <Code>d c y</Code>,{' '}
-              <Code>x p P u Ctrl+R</Code>, insert with <Code>i a I A o O</Code>, select with{' '}
-              <Code>v</Code>, and <Code>:w</Code> <Code>:q</Code>
+              Motions: <Code>h j k l w W b B e E 0 ^ $ {'{'} {'}'} % gg G</Code>,{' '}
+              <Code>f F t T</Code> with <Code>;</Code> <Code>,</Code>, and{' '}
+              <Code>Ctrl+D</Code> <Code>Ctrl+U</Code> — all take a count
+            </Text>
+            <Text size="xs" c="dimmed">
+              Operators: <Code>d c y</Code> over any motion or a text object{' '}
+              (<Code>diw</Code> <Code>ci(</Code> <Code>ya&quot;</Code>), doubled for the line{' '}
+              (<Code>dd cc yy</Code>), plus <Code>D C Y S s x X r ~ J</Code>
+            </Text>
+            <Text size="xs" c="dimmed">
+              Insert with <Code>i a I A o O</Code>, select with <Code>v</Code> <Code>V</Code>{' '}
+              (<Code>o</Code> swaps ends), <Code>p P u Ctrl+R</Code>, and{' '}
+              <Code>:w</Code> <Code>:q</Code> <Code>:q!</Code> <Code>:wq</Code> <Code>:x</Code>
             </Text>
           </Stack>
         </Paper>
@@ -333,8 +355,8 @@ function KeymapSetting({ value, onChange }) {
           />
           {wrong > 1 && (
             <Alert color="yellow" p="xs">
-              Hint: an ex command, starting with a colon, ending with the character that
-              means “I mean it”.
+              Hint: an ex command, starting with a colon. Add the character that means
+              “I mean it” if you like — both spellings count.
             </Alert>
           )}
           <Group justify="flex-end">
