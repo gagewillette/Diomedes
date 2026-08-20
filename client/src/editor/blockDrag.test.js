@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Schema } from '@tiptap/pm/model';
 import { EditorState, NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { BLOCK_ID_ATTR } from './blockId.js';
-import { moveBlockBy } from './blockDrag.js';
+import { createHideScheduler, moveBlockBy } from './blockDrag.js';
 
 // The same minimal schema blockId.test.js uses: enough of a document to move
 // blocks around in, without a DOM or a TipTap editor.
@@ -89,4 +89,84 @@ test('moving down then up leaves the document as it was', () => {
   const there = move(withCursorIn(before, 0), 1);
   const back = move(there, -1);
   assert.deepEqual(idsOf(back), idsOf(before));
+});
+
+// ---- the handle's grace period ----
+//
+// The handle sits out in the gutter, so reaching it means leaving the block it
+// belongs to. Hiding the instant that happened is what put the handle out of
+// reach; these pin down the deferral that replaced it.
+
+/** A stand-in for setTimeout that only fires when the test says so. */
+function fakeTimers() {
+  const pending = new Map();
+  let next = 1;
+  return {
+    setTimer: (fn, delay) => {
+      const id = next++;
+      pending.set(id, { fn, delay });
+      return id;
+    },
+    clearTimer: (id) => pending.delete(id),
+    get size() {
+      return pending.size;
+    },
+    delays: () => [...pending.values()].map((t) => t.delay),
+    run() {
+      const due = [...pending.entries()];
+      pending.clear();
+      due.forEach(([, t]) => t.fn());
+    },
+  };
+}
+
+test('a scheduled hide happens once the delay is up', () => {
+  const timers = fakeTimers();
+  let hidden = 0;
+  const hider = createHideScheduler(() => { hidden += 1; }, { delay: 260, ...timers });
+
+  hider.schedule();
+  assert.equal(hidden, 0, 'nothing hides while the pointer is still crossing');
+  assert.deepEqual(timers.delays(), [260]);
+
+  timers.run();
+  assert.equal(hidden, 1);
+  assert.equal(hider.pending, false);
+});
+
+test('reaching the handle in time calls the hide off', () => {
+  const timers = fakeTimers();
+  let hidden = 0;
+  const hider = createHideScheduler(() => { hidden += 1; }, { delay: 260, ...timers });
+
+  hider.schedule();
+  hider.cancel(); // the pointer arrived on the handle
+  timers.run();
+
+  assert.equal(hidden, 0);
+  assert.equal(hider.pending, false);
+});
+
+test('wandering the gutter cannot postpone a hide already scheduled', () => {
+  const timers = fakeTimers();
+  const hider = createHideScheduler(() => {}, { delay: 260, ...timers });
+
+  hider.schedule();
+  hider.schedule();
+  hider.schedule();
+
+  assert.equal(timers.size, 1, 'one deadline, not one per mouse move');
+});
+
+test('cancelling a hide that never was is harmless', () => {
+  const timers = fakeTimers();
+  const hider = createHideScheduler(() => {}, { delay: 260, ...timers });
+
+  hider.cancel();
+  assert.equal(hider.pending, false);
+
+  hider.schedule();
+  timers.run();
+  hider.cancel(); // after it fired
+  assert.equal(hider.pending, false);
 });

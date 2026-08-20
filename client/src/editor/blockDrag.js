@@ -44,6 +44,12 @@ export const blockDragPluginKey = new PluginKey('blockDrag');
 // paints it.
 const HANDLE_SIZE = 20;
 const HANDLE_GAP = 6;
+// How long the handle stays put after the pointer leaves the block it belongs
+// to. Long enough to cross the gutter at a human pace, short enough that a
+// handle left behind never looks stuck. Kept in step with the right-hand pad on
+// .gd-block-handle::after, which has to stay >= HANDLE_GAP for the trip from
+// text to handle to be one unbroken hover.
+const HIDE_DELAY = 260;
 
 /** Document position of the top-level child at `index`. */
 function posOfChild(doc, index) {
@@ -141,6 +147,39 @@ function createHandle() {
 }
 
 /**
+ * A hide that can be called off.
+ *
+ * Split out of the handle — and given injectable timers — because the grace
+ * period is the whole of the fix and deserves a test that does not need a DOM.
+ * Scheduling twice keeps the first deadline rather than pushing it back: a
+ * pointer wandering the gutter should not be able to hold a stale handle open
+ * for ever.
+ */
+export function createHideScheduler(
+  hide,
+  { delay = HIDE_DELAY, setTimer = setTimeout, clearTimer = clearTimeout } = {}
+) {
+  let timer = null;
+  return {
+    schedule() {
+      if (timer != null) return;
+      timer = setTimer(() => {
+        timer = null;
+        hide();
+      }, delay);
+    },
+    cancel() {
+      if (timer == null) return;
+      clearTimer(timer);
+      timer = null;
+    },
+    get pending() {
+      return timer != null;
+    },
+  };
+}
+
+/**
  * The hover handle.
  *
  * Lives in a plugin view rather than in React because it has to follow the
@@ -163,13 +202,43 @@ function handleView(view) {
   // hovering is not part of the document and putting it in state would put a
   // transaction on every mouse move.
   let hovered = null;
+  // Whether the pointer is resting on the handle itself. Anything that would
+  // otherwise take the handle away has to check this first: pulling it out from
+  // under the pointer is exactly the bug being fixed.
+  let onHandle = false;
 
-  const hide = () => {
+  // Hiding is deferred rather than immediate. The handle deliberately sits in
+  // the gutter, a few pixels clear of the text column, so a pointer travelling
+  // towards it *must* first leave the text — and, for the last stretch, leave
+  // the wrapper the mousemove listener is on. Hiding on that first frame made
+  // the handle unreachable: it vanished while the pointer was still on its way.
+  // A short grace period covers the crossing, and anything proving the pointer
+  // is still in play cancels it. The gap itself is bridged by an invisible pad
+  // on the handle (see .gd-block-handle::after), so this is the belt to that
+  // pair of braces rather than the only defence.
+  const hideNow = () => {
     hovered = null;
     handle.style.display = 'none';
   };
 
+  const hider = createHideScheduler(() => {
+    if (!onHandle) hideNow();
+  });
+
+  const cancelHide = hider.cancel;
+
+  const hide = () => {
+    hider.cancel();
+    hideNow();
+  };
+
+  const scheduleHide = () => {
+    if (hovered == null || onHandle) return;
+    hider.schedule();
+  };
+
   const show = (pos) => {
+    cancelHide();
     const dom = view.nodeDOM(pos);
     if (!(dom instanceof HTMLElement)) return hide();
     const rect = dom.getBoundingClientRect();
@@ -183,16 +252,33 @@ function handleView(view) {
 
   const onMouseMove = (event) => {
     if (!view.editable || view.dragging) return;
-    if (handle.contains(event.target)) return; // keep it where it is
+    if (handle.contains(event.target)) {
+      cancelHide(); // heading for the handle, not away from the block
+      return;
+    }
     const pos = blockPosAt(view, event.clientX, event.clientY);
-    if (pos == null) return hide();
+    // A miss is the gap between two blocks, or the gutter above the pad — both
+    // places the pointer passes through on the way somewhere, so give it time
+    // to arrive instead of hiding under it.
+    if (pos == null) return scheduleHide();
     if (pos !== hovered) show(pos);
+    else cancelHide();
   };
 
   // Leaving the wrapper entirely, not merely crossing between blocks inside it.
   const onMouseLeave = (event) => {
     if (event.relatedTarget && host.contains(event.relatedTarget)) return;
-    hide();
+    scheduleHide();
+  };
+
+  const onHandleEnter = () => {
+    onHandle = true;
+    cancelHide();
+  };
+
+  const onHandleLeave = () => {
+    onHandle = false;
+    scheduleHide();
   };
 
   // Selecting on mousedown rather than on click: by the time a click fires the
@@ -232,13 +318,28 @@ function handleView(view) {
   };
 
   const onDragEnd = () => {
+    onHandle = false;
     host.classList.remove('is-block-dragging');
+    // The drag started on the handle, which is a sibling of view.dom rather
+    // than a child of it, so ProseMirror's own dragstart/dragend handlers never
+    // saw it. Only a drop *inside* the editor clears `view.dragging`; a drag
+    // abandoned anywhere else — Escape, a drop on the sidebar, a drop in
+    // another window — would leave it set for good, and onMouseMove reads it as
+    // "a drag is still running" and stops showing the handle at all. Clearing
+    // it here is safe: dragend fires after the drop, so a real drop has already
+    // taken the slice.
+    view.dragging = null;
     hide();
   };
 
-  view.dom.addEventListener('mousemove', onMouseMove);
+  // On the wrapper rather than on view.dom: moves inside the text still arrive
+  // here by bubbling, and the ones in the gutter — where the handle lives, and
+  // where view.dom never sees them — arrive too.
+  host.addEventListener('mousemove', onMouseMove);
   host.addEventListener('mouseleave', onMouseLeave);
   handle.addEventListener('mousemove', onMouseMove);
+  handle.addEventListener('mouseenter', onHandleEnter);
+  handle.addEventListener('mouseleave', onHandleLeave);
   handle.addEventListener('mousedown', onMouseDown);
   handle.addEventListener('dragstart', onDragStart);
   handle.addEventListener('dragend', onDragEnd);
@@ -250,10 +351,14 @@ function handleView(view) {
       // different block. Rather than guess where the old one went, drop the
       // handle; the next mouse move puts it back on whatever is really there.
       if (hovered == null) return;
+      // Unless the pointer is on the handle right now — someone typing
+      // elsewhere in a shared document must not snatch it away mid-grab.
+      if (onHandle) return;
       if (!updatedView.editable || !prevState.doc.eq(updatedView.state.doc)) hide();
     },
     destroy() {
-      view.dom.removeEventListener('mousemove', onMouseMove);
+      cancelHide();
+      host.removeEventListener('mousemove', onMouseMove);
       host.removeEventListener('mouseleave', onMouseLeave);
       host.classList.remove('gd-block-handle-host', 'is-block-dragging');
       handle.remove();

@@ -42,6 +42,16 @@
   transition: opacity 120ms ease, background-color 120ms ease;
   z-index: 70;
 }
+/* The handle sits out in the gutter, HANDLE_GAP clear of the text column, so
+   the pointer has to cross a few pixels of nothing to reach it. This invisible
+   pad bridges exactly that gap — it stops at the text edge rather than under it,
+   so clicking the first character of a line still puts the caret there — and
+   pads the other three sides, all of which are gutter. */
+.gd-block-handle::after {
+  content: '';
+  position: absolute;
+  inset: -8px -6px -8px -10px;
+}
 .gd-block-handle:hover {
   opacity: 1;
   background: var(--mantine-color-default-hover);
