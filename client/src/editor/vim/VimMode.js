@@ -136,6 +136,33 @@ export function textNear(doc, pos, dir) {
   return found ? found.head : Selection.near($p, dir).head;
 }
 
+/**
+ * Where a normal-mode cursor is allowed to rest. Vim's cursor sits *on* a
+ * character, so it can never stop past the last one — and here it must not,
+ * because the block cursor is a decoration over that character while the real
+ * caret is transparent: a cursor at end-of-line has nothing to draw and simply
+ * vanishes. `j` and `k` carry a goal column, so stepping into a shorter line —
+ * a heading, usually — lands exactly there. So do `$`, `x` on the final
+ * character, and Escape out of insert at the end of a line.
+ */
+export function eolCursor(pos, start, end) {
+  if (end <= start) return start;
+  return Math.min(Math.max(pos, start), end - 1);
+}
+
+/**
+ * What the block cursor should be painted over: the character under `pos`, or,
+ * on an empty line where there is no character at all, the empty slot itself —
+ * which the decoration fills with a block of its own rather than drawing
+ * nothing.
+ */
+export function blockCursorAt(doc, pos, start, end) {
+  if (pos >= start && pos < end && charAt(doc, pos)) {
+    return { type: 'char', from: pos, to: pos + 1 };
+  }
+  return { type: 'eol', at: Math.min(Math.max(pos, start), end) };
+}
+
 function firstNonBlank(doc, $p) {
   const start = lineStart($p);
   const end = lineEnd($p);
@@ -340,22 +367,36 @@ export const VimMode = Extension.create({
       view.dispatch(view.state.tr.setMeta(vimPluginKey, patch));
     };
 
+    // Pull a position back onto the line's last character, so a normal-mode
+    // cursor never rests where there is nothing to draw it on.
+    const restingPos = (doc, pos) => {
+      const $p = doc.resolve(clamp(pos, doc));
+      if (!isTextblock($p)) return $p.pos;
+      return eolCursor($p.pos, $p.start(), $p.end());
+    };
+
     const toNormal = (view, extra = {}) => {
       const { state } = view;
       const tr = state.tr.setMeta(vimPluginKey, {
         mode: 'normal', operator: null, command: null, linewise: false,
         vanchor: null, vhead: null, ...CLEARED, ...extra,
       });
-      if (!state.selection.empty) {
-        tr.setSelection(TextSelection.create(state.doc, state.selection.from));
+      const at = restingPos(state.doc, state.selection.empty
+        ? state.selection.head
+        : state.selection.from);
+      if (!state.selection.empty || at !== state.selection.head) {
+        tr.setSelection(TextSelection.create(state.doc, at));
       }
       view.dispatch(tr);
     };
 
-    const moveTo = (view, pos, extend, extra = {}) => {
+    // `eol` is for the handful of commands that land on end-of-line on purpose
+    // because insert mode is about to open there — a A o — where vim's
+    // last-character rule does not apply.
+    const moveTo = (view, pos, extend, extra = {}, { eol = false } = {}) => {
       const { state } = view;
       const vim = vimPluginKey.getState(state);
-      const $to = state.doc.resolve(clamp(pos, state.doc));
+      const $to = state.doc.resolve(eol ? clamp(pos, state.doc) : restingPos(state.doc, pos));
       let selection;
       if (extend && vim?.linewise) {
         // V: the highlight always covers whole blocks, but the cursor we move
@@ -398,7 +439,7 @@ export const VimMode = Extension.create({
         const { state } = view;
         view.dispatch(
           state.tr
-            .setSelection(Selection.near(state.doc.resolve(clamp(lo, state.doc)), 1))
+            .setSelection(Selection.near(state.doc.resolve(restingPos(state.doc, lo)), 1))
             .setMeta(vimPluginKey, {
               mode: 'normal', operator: null, linewise: false, vanchor: null, vhead: null, ...CLEARED,
             })
@@ -406,7 +447,10 @@ export const VimMode = Extension.create({
         return;
       }
       const tr = view.state.tr.delete(lo, hi);
-      tr.setSelection(Selection.near(tr.doc.resolve(clamp(lo, tr.doc)), 1));
+      tr.setSelection(Selection.near(
+        tr.doc.resolve(operator === 'c' ? clamp(lo, tr.doc) : restingPos(tr.doc, lo)),
+        1
+      ));
       tr.setMeta(vimPluginKey, {
         mode: operator === 'c' ? 'insert' : 'normal',
         operator: null, linewise: false, vanchor: null, vhead: null, ...CLEARED,
@@ -650,9 +694,21 @@ export const VimMode = Extension.create({
             if (!vim || vim.mode === 'insert' || !state.selection.empty) return null;
             const pos = state.selection.head;
             const $pos = state.doc.resolve(pos);
-            if (pos >= lineEnd($pos) || !charAt(state.doc, pos)) return null;
+            if (!isTextblock($pos)) return null;
+            const at = blockCursorAt(state.doc, pos, lineStart($pos), lineEnd($pos));
+            if (at.type === 'char') {
+              return DecorationSet.create(state.doc, [
+                Decoration.inline(at.from, at.to, { class: 'gd-vim-block-cursor' }),
+              ]);
+            }
+            // An empty line has no character to sit on, so the block is drawn
+            // as a widget of its own rather than not at all.
             return DecorationSet.create(state.doc, [
-              Decoration.inline(pos, pos + 1, { class: 'gd-vim-block-cursor' }),
+              Decoration.widget(at.at, () => {
+                const span = document.createElement('span');
+                span.className = 'gd-vim-block-cursor gd-vim-block-cursor-empty';
+                return span;
+              }, { side: 1, key: 'gd-vim-eol-cursor' }),
             ]);
           },
 
@@ -816,7 +872,7 @@ export const VimMode = Extension.create({
                 setState(view, { mode: 'insert', ...CLEARED, operator: null });
                 return true;
               case 'a':
-                moveTo(view, Math.min(head + 1, lineEnd($head)), false);
+                moveTo(view, Math.min(head + 1, lineEnd($head)), false, {}, { eol: true });
                 setState(view, { mode: 'insert' });
                 return true;
               case 'I':
@@ -824,7 +880,7 @@ export const VimMode = Extension.create({
                 setState(view, { mode: 'insert' });
                 return true;
               case 'A':
-                moveTo(view, lineEnd($head), false);
+                moveTo(view, lineEnd($head), false, {}, { eol: true });
                 setState(view, { mode: 'insert' });
                 return true;
               case 'o':
@@ -838,7 +894,7 @@ export const VimMode = Extension.create({
                   );
                   return true;
                 }
-                moveTo(view, lineEnd($head), false);
+                moveTo(view, lineEnd($head), false, {}, { eol: true });
                 editor.commands.splitBlock();
                 setState(view, { mode: 'insert' });
                 return true;
