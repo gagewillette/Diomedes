@@ -10,9 +10,8 @@ import { requireAuth, assertSpaceRole, spaceRole, getPage, resolveUser } from '.
 import { convertToPdf, pdfConversionAvailable } from '../lib/convert.js';
 import { uploadsEnabled, getWorkspace } from '../lib/workspace.js';
 import { PDF_MIME, docTypeFor, inlineAllowed } from '../lib/doctypes.js';
-import { STORAGE_PATH } from '../lib/storage.js';
 
-export { STORAGE_PATH };
+export const STORAGE_PATH = process.env.STORAGE_PATH || path.resolve(process.cwd(), 'data/storage');
 
 // Documents live under a per-user directory rather than the per-space layout
 // used by inline images and videos.

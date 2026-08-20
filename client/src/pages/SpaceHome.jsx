@@ -16,7 +16,6 @@ import dayjs from 'dayjs';
 import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { markdownToJSON } from '../lib/markdown.js';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { makeConfirmPhrase, confirmPhraseMatches, CONFIRM_LENGTH } from '../lib/confirmPhrase.js';
 
 export default function SpaceHome() {
   const { slug } = useParams();
@@ -496,92 +495,17 @@ function MembersModal({ space, opened, onClose, onChanged }) {
 
 function TrashModal({ space, opened, onClose, onChanged }) {
   const [items, setItems] = useState([]);
-  const [total, setTotal] = useState(0);
-  // Non-null once "Delete all" is armed: the phrase the admin has to retype.
-  const [phrase, setPhrase] = useState(null);
-  const [typed, setTyped] = useState('');
-  const [emptying, setEmptying] = useState(false);
-  const canDeleteForever = space.my_role === 'admin';
-
   const load = useCallback(async () => {
     const d = await api.get(`/api/spaces/${space.id}/trash`);
     setItems(d.pages);
-    setTotal(d.total ?? d.pages.length);
   }, [space.id]);
   useEffect(() => { if (opened) load(); }, [opened, load]);
-  // Closing the modal disarms it. Reopening to a confirmation left over from
-  // last time, one keystroke from finished, is exactly the accident the typed
-  // phrase exists to prevent.
-  useEffect(() => { if (!opened) { setPhrase(null); setTyped(''); } }, [opened]);
 
   const act = async (fn) => { await fn(); load(); onChanged(); emitPagesChanged(space.id); };
-
-  const emptyTrash = async () => {
-    setEmptying(true);
-    try {
-      const d = await api.del(`/api/spaces/${space.id}/trash`);
-      setPhrase(null);
-      setTyped('');
-      notifications.show({
-        message: `Deleted ${d.deleted} page${d.deleted === 1 ? '' : 's'} forever.`,
-      });
-      await load();
-      onChanged();
-      emitPagesChanged(space.id);
-    } catch (err) {
-      notifications.show({ color: 'red', message: err.message });
-    } finally {
-      setEmptying(false);
-    }
-  };
 
   return (
     <Modal opened={opened} onClose={onClose} title="Trash" size="md">
       <Stack gap={4}>
-        {canDeleteForever && total > 0 && (
-          <Group justify="space-between" wrap="nowrap" mb={4}>
-            <Text size="xs" c="dimmed">{total} page{total === 1 ? '' : 's'} in the trash</Text>
-            <Button
-              size="xs" color="red" variant="light" leftSection={<IconTrash size={14} />}
-              disabled={!!phrase}
-              onClick={() => { setTyped(''); setPhrase(makeConfirmPhrase()); }}
-            >
-              Delete all
-            </Button>
-          </Group>
-        )}
-        {phrase && (
-          <Paper withBorder p="sm" mb="xs" bg="var(--mantine-color-red-light)">
-            <Stack gap="xs">
-              <Text size="sm">
-                This permanently deletes all {total} page{total === 1 ? '' : 's'} in this
-                space&apos;s trash, along with their history, comments, links and attachments.
-                It cannot be undone.
-              </Text>
-              <Text size="sm">
-                Type <Text span fw={700} ff="monospace">{phrase}</Text> to confirm.
-              </Text>
-              <TextInput
-                value={typed} onChange={(e) => setTyped(e.currentTarget.value)}
-                placeholder={phrase} maxLength={CONFIRM_LENGTH} autoFocus
-                aria-label={`Type ${phrase} to confirm deleting everything in the trash`}
-                styles={{ input: { fontFamily: 'monospace', letterSpacing: 2, textTransform: 'uppercase' } }}
-              />
-              <Group gap="xs" justify="flex-end">
-                <Button size="xs" variant="default" onClick={() => { setPhrase(null); setTyped(''); }}>
-                  Cancel
-                </Button>
-                <Button
-                  size="xs" color="red" loading={emptying}
-                  disabled={!confirmPhraseMatches(typed, phrase)}
-                  onClick={emptyTrash}
-                >
-                  Delete everything
-                </Button>
-              </Group>
-            </Stack>
-          </Paper>
-        )}
         {items.length === 0 && <Text c="dimmed" size="sm">Trash is empty.</Text>}
         {items.map((p) => (
           <Group key={p.id} justify="space-between" wrap="nowrap" className="gd-page-row">
