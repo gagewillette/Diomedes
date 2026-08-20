@@ -95,12 +95,23 @@ export async function adminAudience(extra = []) {
   return uniq([...rows.map((r) => r.id), ...extra]);
 }
 
-// Everyone who can see a space: its members plus workspace admins.
+// Every active user. Used when a change is visible workspace-wide, such as a
+// space opening up to (or closing off from) the public.
+export async function everyoneAudience(extra = []) {
+  const { rows } = await q(`SELECT id FROM users WHERE active`);
+  return uniq([...rows.map((r) => r.id), ...extra]);
+}
+
+// Everyone who can see a space: its members plus workspace admins — and, when
+// the space grants public access, every active user.
 export async function spaceAudience(spaceId, extra = []) {
   const { rows } = await q(
     `SELECT user_id AS id FROM space_members WHERE space_id = $1
      UNION
-     SELECT id FROM users WHERE role IN ('owner', 'admin') AND active`,
+     SELECT id FROM users WHERE role IN ('owner', 'admin') AND active
+     UNION
+     SELECT u.id FROM users u
+     WHERE u.active AND EXISTS (SELECT 1 FROM spaces s WHERE s.id = $1 AND s.public_role IS NOT NULL)`,
     [spaceId]
   );
   return uniq([...rows.map((r) => r.id), ...extra]);

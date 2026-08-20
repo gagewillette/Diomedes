@@ -67,9 +67,9 @@ Every response carries a `Server-Timing: app;dur=<ms>` header, which the browser
 | GET | `/api/spaces` | Spaces visible to the caller, with `my_role` |
 | POST | `/api/spaces` | `{name, description?, icon?}` (workspace admin) |
 | GET | `/api/spaces/:slug` | Lookup by slug |
-| PATCH | `/api/spaces/:id` | (space admin) |
+| PATCH | `/api/spaces/:id` | `{name?, description?, icon?, publicRole?}` (space admin). `publicRole` is `reader`, `writer`, or `null` to turn public access off |
 | DELETE | `/api/spaces/:id` | (workspace admin) |
-| GET/POST | `/api/spaces/:id/members` | POST `{userId, role: admin\|writer\|reader}` |
+| GET/POST | `/api/spaces/:id/members` | POST `{userId, role: admin\|writer\|reader}`. A member row overrides the space's `public_role` in both directions |
 | PATCH/DELETE | `/api/spaces/:id/members/:userId` | |
 
 ### Pages

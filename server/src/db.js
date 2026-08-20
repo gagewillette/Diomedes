@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS spaces (
   slug text UNIQUE NOT NULL,
   description text NOT NULL DEFAULT '',
   icon text NOT NULL DEFAULT '📚',
+  public_role text CHECK (public_role IS NULL OR public_role IN ('reader','writer')),
   created_by uuid REFERENCES users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -302,6 +303,13 @@ export async function migrate() {
   await q(SCHEMA);
   // additive migrations for existing deployments
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'`);
+  // Space-wide default access. NULL keeps the space private (membership only);
+  // 'reader'/'writer' let every signed-in user in at that level unless they
+  // have a space_members row, which always wins.
+  await q(`ALTER TABLE spaces ADD COLUMN IF NOT EXISTS public_role text`);
+  await q(`ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_public_role_check`);
+  await q(`ALTER TABLE spaces ADD CONSTRAINT spaces_public_role_check
+           CHECK (public_role IS NULL OR public_role IN ('reader','writer'))`);
   // Realtime collaboration: the encoded Yjs document is the live source of
   // truth while a page is open; pages.content stays as the queryable snapshot.
   await q(`

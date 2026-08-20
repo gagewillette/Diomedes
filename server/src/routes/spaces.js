@@ -1,8 +1,16 @@
 import { Router } from 'express';
 import { q } from '../db.js';
 import { asyncRoute, httpError, slugify } from '../lib/util.js';
-import { requireAuth, requireAdmin, isWorkspaceAdmin, assertSpaceRole, spaceRole } from '../lib/auth.js';
-import { publish, adminAudience, spaceAudience } from '../lib/events.js';
+import {
+  requireAuth,
+  requireAdmin,
+  isWorkspaceAdmin,
+  assertSpaceRole,
+  spaceRole,
+  PUBLIC_ROLES,
+  SPACE_ROLES,
+} from '../lib/auth.js';
+import { publish, adminAudience, spaceAudience, everyoneAudience } from '../lib/events.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -29,10 +37,12 @@ router.get(
         [req.user.id]
       ));
     } else {
+      // Membership wins; public spaces show up too, at the public role.
       ({ rows } = await q(
-        `SELECT s.*, m.role AS my_role,
+        `SELECT s.*, COALESCE(m.role, s.public_role) AS my_role,
                 (SELECT count(*)::int FROM pages p WHERE p.space_id = s.id AND p.deleted_at IS NULL) AS page_count
-         FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
+         FROM spaces s LEFT JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
+         WHERE m.role IS NOT NULL OR s.public_role IS NOT NULL
          ORDER BY s.created_at`,
         [req.user.id]
       ));
@@ -70,7 +80,7 @@ router.get(
     const space = rows[0];
     if (!space) throw httpError(404, 'Space not found');
     const myRole = await spaceRole(req.user, space.id);
-    if (!myRole) throw httpError(403, 'You are not a member of this space');
+    if (!myRole) throw httpError(403, 'You do not have access to this space');
     res.json({ space: { ...space, my_role: myRole } });
   })
 );
@@ -79,15 +89,30 @@ router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
     await assertSpaceRole(req.user, req.params.id, 'admin');
-    const { name, description, icon } = req.body || {};
+    const body = req.body || {};
+    const { name, description, icon } = body;
     if (name !== undefined && !name.trim()) throw httpError(400, 'Name cannot be empty');
+
+    // publicRole: null/'' turns public access off, otherwise a role everyone gets.
+    const changingPublic = 'publicRole' in body;
+    const publicRole = body.publicRole || null;
+    if (changingPublic && publicRole !== null && !PUBLIC_ROLES.includes(publicRole)) {
+      throw httpError(400, 'Invalid public role');
+    }
+
     const { rows } = await q(
-      `UPDATE spaces SET name = COALESCE($1, name), description = COALESCE($2, description), icon = COALESCE($3, icon)
+      `UPDATE spaces SET name = COALESCE($1, name), description = COALESCE($2, description), icon = COALESCE($3, icon),
+              public_role = CASE WHEN $5 THEN $6 ELSE public_role END
        WHERE id = $4 RETURNING *`,
-      [name?.trim(), description, icon, req.params.id]
+      [name?.trim(), description, icon, req.params.id, changingPublic, publicRole]
     );
     if (!rows[0]) throw httpError(404, 'Space not found');
-    publish({ type: 'spaces-changed', userIds: await spaceAudience(req.params.id) });
+    // Turning public access on or off changes who can see the space at all, so
+    // the whole workspace needs to re-read its space list, not just the members.
+    publish({
+      type: 'spaces-changed',
+      userIds: changingPublic ? await everyoneAudience() : await spaceAudience(req.params.id),
+    });
     res.json({ space: rows[0] });
   })
 );
@@ -217,7 +242,7 @@ router.post(
   asyncRoute(async (req, res) => {
     await assertSpaceRole(req.user, req.params.id, 'admin');
     const { userId, role = 'reader' } = req.body || {};
-    if (!['admin', 'writer', 'reader'].includes(role)) throw httpError(400, 'Invalid role');
+    if (!SPACE_ROLES.includes(role)) throw httpError(400, 'Invalid role');
     const { rows: u } = await q('SELECT 1 FROM users WHERE id = $1', [userId]);
     if (!u.length) throw httpError(404, 'User not found');
     await q(
@@ -235,7 +260,7 @@ router.patch(
   asyncRoute(async (req, res) => {
     await assertSpaceRole(req.user, req.params.id, 'admin');
     const { role } = req.body || {};
-    if (!['admin', 'writer', 'reader'].includes(role)) throw httpError(400, 'Invalid role');
+    if (!SPACE_ROLES.includes(role)) throw httpError(400, 'Invalid role');
     await q('UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3', [
       role,
       req.params.id,

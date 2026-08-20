@@ -66,6 +66,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |
+| Public space access | ✅ a space can grant every signed-in user view or edit access by default; a member's own role always overrides it, up or down |
 | Email invitations + SMTP | ✅→ Replaced by direct admin user creation with username + password (no SMTP dependency; your docmost SMTP was never configured anyway) |
 | SSO/OIDC/MFA (Enterprise) | ➖ Username/password sessions (Redis-backed), login rate limiting |
 | Deactivate users | ✅ |
