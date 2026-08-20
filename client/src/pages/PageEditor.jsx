@@ -71,6 +71,24 @@ export default function PageEditor() {
     [data, user?.id]
   );
 
+  // Someone rearranged the tree while this page was open. Only a move that
+  // touched *this* page matters here: its breadcrumbs are now wrong, and a move
+  // between spaces has also renamed its URL, so the address bar is corrected in
+  // place rather than leaving the reader on a link that names the old space.
+  useEffect(
+    () =>
+      onAppEvent('page-moved', (e) => {
+        const d = e.detail || {};
+        if (!d.pageIds?.includes(pageId)) return;
+        if (d.crossSpace && d.spaceSlug && d.spaceSlug !== slug) {
+          navigate(`/s/${d.spaceSlug}/p/${pageId}`, { replace: true });
+          return; // the slug is a load() dependency, so this refetches too
+        }
+        setReloadKey((k) => k + 1);
+      }),
+    [pageId, slug, navigate]
+  );
+
   const canWrite = data && ['admin', 'writer'].includes(data.myRole);
 
   // Live collaboration session for this page. Readers join too — presence is
