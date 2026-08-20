@@ -7,11 +7,13 @@ import { useDisclosure, useHotkeys } from '@mantine/hooks';
 import {
   IconSearch, IconHome, IconPlus, IconSun, IconMoon, IconLogout, IconSettings,
   IconUsers, IconChevronDown, IconChevronRight, IconLayoutSidebarLeftCollapse, IconBuilding,
+  IconGauge,
 } from '@tabler/icons-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { api } from '../lib/api.js';
+import { startRoute, settleRoute } from '../lib/perf.js';
 import { focusEditor, focusFileTree } from '../lib/vimFocus.js';
 import PageTree from './PageTree.jsx';
 import SearchModal from './SearchModal.jsx';
@@ -42,6 +44,14 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const slug = pathname.startsWith('/s/') ? pathname.split('/')[2] : null;
+
+  // Time every in-app navigation. The clock starts here, before the new screen
+  // renders, and stops when that screen's data lands (markPageReady) — or two
+  // frames later for screens with nothing to fetch.
+  useEffect(() => {
+    startRoute(pathname);
+    settleRoute();
+  }, [pathname]);
 
   useHotkeys([['mod+K', () => searchHandlers.open()]]);
 
@@ -168,6 +178,9 @@ export default function Layout({ children }) {
                   <>
                     <Menu.Item leftSection={<IconUsers size={14} />} component={Link} to="/settings/members">
                       Manage users
+                    </Menu.Item>
+                    <Menu.Item leftSection={<IconGauge size={14} />} component={Link} to="/settings/workspace/info">
+                      Workspace info
                     </Menu.Item>
                     <Menu.Item leftSection={<IconBuilding size={14} />} component={Link} to="/settings/workspace">
                       Workspace settings

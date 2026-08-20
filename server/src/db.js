@@ -117,6 +117,26 @@ CREATE INDEX IF NOT EXISTS page_links_target_idx ON page_links (target_id);
 CREATE INDEX IF NOT EXISTS page_links_title_idx ON page_links
   (lower(regexp_replace(btrim(target_title), '\s+', ' ', 'g'))) WHERE target_id IS NULL;
 
+CREATE TABLE IF NOT EXISTS perf_samples (
+  id bigserial PRIMARY KEY,
+  ts timestamptz NOT NULL DEFAULT now(),
+  source text NOT NULL CHECK (source IN ('client','server')),
+  kind text NOT NULL,
+  name text NOT NULL DEFAULT '',
+  user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  duration_ms double precision NOT NULL DEFAULT 0,
+  server_ms double precision,
+  transfer_bytes bigint NOT NULL DEFAULT 0,
+  encoded_bytes bigint NOT NULL DEFAULT 0,
+  decoded_bytes bigint NOT NULL DEFAULT 0,
+  status int,
+  count int NOT NULL DEFAULT 1,
+  detail jsonb NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS perf_samples_ts_idx ON perf_samples (ts DESC);
+CREATE INDEX IF NOT EXISTS perf_samples_kind_idx ON perf_samples (source, kind, ts DESC);
+CREATE INDEX IF NOT EXISTS perf_samples_name_idx ON perf_samples (kind, name, ts DESC);
+
 CREATE TABLE IF NOT EXISTS attachments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   page_id uuid REFERENCES pages(id) ON DELETE CASCADE,

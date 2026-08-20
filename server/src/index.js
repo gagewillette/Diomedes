@@ -18,6 +18,9 @@ import tokenRoutes from './routes/tokens.js';
 import workspaceRoutes from './routes/workspace.js';
 import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
+import perfRoutes from './routes/perf.js';
+import { perfMiddleware, initPerf, prune } from './lib/perf.js';
+import { perfLoggingEnabled } from './lib/workspace.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -33,6 +36,15 @@ async function main() {
 
   initSearch(redis);
   initEvents(redis);
+  // The recorder buffers in memory and flushes on a timer; it asks the
+  // workspace switch at flush time, so turning logging off stops writes
+  // without needing to tear the middleware out of the stack.
+  initPerf(perfLoggingEnabled);
+  // Aged-out samples go on boot and then daily — cheap, and it keeps a
+  // long-running install from growing a table nobody ever looks at.
+  const pruneSoon = () => prune().catch((err) => console.error('perf prune failed', err.message));
+  pruneSoon();
+  setInterval(pruneSoon, 24 * 3600 * 1000).unref();
 
   const app = express();
   app.disable('x-powered-by');
@@ -54,6 +66,9 @@ async function main() {
     },
   });
   app.use(sessionMiddleware);
+  // Before the routes so it wraps everything, after the session so a sample can
+  // be attributed to a user once a route resolves one.
+  app.use(perfMiddleware);
 
   app.get('/api/health', async (_req, res) => res.json({ ok: true, search: await searchHealth() }));
   app.use('/api/auth', authRoutes(redis));
@@ -62,6 +77,7 @@ async function main() {
   app.use('/api/tokens', tokenRoutes);
   app.use('/api/events', eventRoutes);
   app.use('/api/workspace', workspaceRoutes);
+  app.use('/api/perf', perfRoutes);
   // fileRoutes first: it contains the unauthenticated /public and /files routes,
   // while pageRoutes guards its whole router with requireAuth.
   app.use('/api', fileRoutes);

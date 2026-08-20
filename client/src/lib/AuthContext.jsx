@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { startRealtime } from './realtime.js';
 import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
 import { mergeWorkspace, DEFAULT_WORKSPACE } from './workspace.js';
+import { startPerfCollector, stopPerfCollector } from './perf.js';
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
@@ -95,6 +96,19 @@ export function AuthProvider({ children }) {
     });
   }, [state.user?.id, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The collector follows the workspace switch, in this tab and in every other
+  // one: an admin turning logging off stops browsers that are already open,
+  // because the same settings event that updates the state runs this effect.
+  const { logging: perfLogging, sampleRate: perfSampleRate } = state.workspace.performance;
+  useEffect(() => {
+    if (!state.user || !perfLogging) {
+      stopPerfCollector();
+      return undefined;
+    }
+    startPerfCollector({ sampleRate: perfSampleRate });
+    return () => stopPerfCollector({ drain: true });
+  }, [state.user?.id, perfLogging, perfSampleRate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const logout = useCallback(async () => {
     await api.post('/api/auth/logout');
     location.assign('/login');
@@ -111,6 +125,12 @@ export function AuthProvider({ children }) {
     },
     [state.user?.preferences] // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  const updatePerformance = useCallback(async (partial) => {
+    const data = await api.patch('/api/workspace/settings/performance', { performance: partial });
+    setState((s) => ({ ...s, workspace: mergeWorkspace(data.workspace) }));
+    return data.workspace;
+  }, []);
 
   // Admin-only write; every browser (including this one) picks the change up
   // again over SSE, which is what keeps other tabs in step.
@@ -131,6 +151,8 @@ export function AuthProvider({ children }) {
         updatePreferences,
         dataSavings: state.workspace.dataSavings,
         updateDataSavings,
+        performanceSettings: state.workspace.performance,
+        updatePerformance,
       }}
     >
       {children}
@@ -145,4 +167,5 @@ export const useAuth = () =>
     preferences: DEFAULT_PREFS,
     workspace: DEFAULT_WORKSPACE,
     dataSavings: DEFAULT_WORKSPACE.dataSavings,
+    performanceSettings: DEFAULT_WORKSPACE.performance,
   };
