@@ -6,6 +6,11 @@ export const DEFAULT_PREFS = {
   smoothCaret: true,
   animations: true,
   keymap: 'default',
+  // Code-block checking, per device. 'inherit' follows the workspace setting;
+  // 'off' turns it off here only. The workspace flag is a ceiling — this can
+  // turn checking down, never back on once an admin has switched it off — so
+  // there is deliberately no 'on'.
+  codeLinting: 'inherit',
 };
 
 export const FONT_STACKS = {
@@ -30,6 +35,11 @@ export const WIDTH_TO_CONTAINER = { narrow: 'sm', normal: 'md', wide: 'xl' };
 export const KEYMAP_LABELS = {
   default: 'Default (no emulation)',
   vim: 'Vim',
+};
+
+export const CODE_LINTING_LABELS = {
+  inherit: 'Follow the workspace setting',
+  off: 'Off on this device',
 };
 
 export const VIM_CHALLENGE = 'How do you quit Vim?';

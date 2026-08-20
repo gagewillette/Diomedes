@@ -134,6 +134,49 @@ document with ids stripped makes every block look new. See
 | DELETE | `/api/spaces/:id/trash` | (space admin) Empty the trash: permanently deletes every trashed page in the space along with its versions, blocks, comments, links, attachments and embeddings, and removes the attachment files from storage. Returns `{deleted}`. Cannot be undone. |
 | GET | `/api/pages/recent` | Recent pages across caller's spaces |
 | GET | `/api/search?q=…&space=…` | Full-text; snippets mark hits with `[[[` `]]]` |
+| GET | `/api/pages/link-search?q=…&spaceId=…` | Autocomplete for the `[[link]]` and parent pickers: substring match, caller's space floated to the top, twelve rows. Built for a human choosing from a menu — do not resolve links with it (see below) |
+| POST | `/api/pages/resolve-titles` | `{titles[], spaceId?}` → `{results}` keyed by the title asked for. Exact, normalized title lookup for clients writing `[[links]]` without a person in the loop |
+
+#### Resolving `[[links]]`
+
+A `pageLink` node stores the target's `pageId`, and that id is what survives a
+rename. A client writing markdown has only the title, so it has to turn titles
+into ids — and `link-search` is the wrong tool for that job: it is a substring
+match ranked by recency and cut off at twelve rows, so during a bulk import the
+page you are looking for can sit outside the window while unrelated substring
+hits fill it. The lookup silently comes back empty for a page that plainly
+exists.
+
+`POST /api/pages/resolve-titles` answers the question a machine is actually
+asking. Titles are matched whole, normalized for case and surrounding and inner
+whitespace — the same normalization the link table uses — and a batch of up to
+200 is answered in one round trip:
+
+```jsonc
+// request
+{ "spaceId": "…", "titles": ["Architecture", "Auth Service", "Overview"] }
+
+// response — keyed by the title as it was asked for
+{ "results": {
+    "Architecture": { "status": "ok", "id": "…", "title": "Architecture",
+                      "icon": null, "space_id": "…", "space_slug": "eng", "space_name": "Eng" },
+    "Auth Service": { "status": "not_found" },
+    "Overview":     { "status": "ambiguous", "candidates": [ { "id": "…", … }, { "id": "…", … } ] }
+} }
+```
+
+A page in `spaceId` wins over pages titled the same elsewhere — that is what
+`[[Overview]]` means when you are writing inside a space that has one. Failing
+that, a single match in any space the caller can read resolves. A genuine tie is
+reported as `ambiguous` rather than decided by an arbitrary ordering, so a client
+can leave the link unresolved and say why. `spaceId` requires reader access; the
+search never reaches outside the caller's spaces.
+
+A link that resolves to nothing is a legitimate, durable state, not an error:
+the node keeps its label with `pageId: null`, renders as unresolved, and the
+client re-resolves the label at render time — so a link written before its target
+existed starts working the moment the target is written, with no rewrite of the
+document, no new version, and no re-embedding.
 
 ### Versions, comments, favorites, sharing
 | Method | Path |
