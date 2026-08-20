@@ -15,6 +15,7 @@
 import { pool } from '../db.js';
 import { extractText } from './util.js';
 import { materializeBlocks, splitBlocks } from './blocks.js';
+import { normalizeDiagrams } from './diagrams.js';
 
 // Same expression the routes used inline, kept identical so the migration
 // changes no search behaviour.
@@ -64,7 +65,10 @@ export async function writePageBody({ pageId, content, title, icon, userId, conn
       // with those ids in it — which is what has to be stored, or the next
       // save mints different ids for the same blocks and every block on the
       // page looks new.
-      const { blocks, document } = splitBlocks(content);
+      // Normalise before splitting: a mermaid fence that arrived as a code
+      // block has to become a diagram node here, or it is that code block's id
+      // and text that get projected, embedded and cached.
+      const { blocks, document } = splitBlocks(normalizeDiagrams(content));
       stored = document;
       text = extractText(document);
       const result = await materializeBlocks(db, { pageId, blocks, rev, userId });

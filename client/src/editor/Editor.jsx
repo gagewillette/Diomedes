@@ -40,6 +40,7 @@ import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { FindInPage } from './FindInPage.js';
 import { BlockId } from './blockId.js';
+import { BlockDrag } from './blockDrag.js';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
@@ -59,7 +60,7 @@ const lowlight = createLowlight(common);
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false }) {
   return [
     // First in the list, and at a higher priority than everything else: in
     // normal mode the keys must not reach the ordinary editing keymap.
@@ -114,6 +115,10 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // global attributes are applied to the types they name once the whole
     // extension set is resolved, so DocumentBlock below is covered too.
     BlockId,
+    // The hover handle and Alt+Shift+Arrow. Only for someone who can actually
+    // edit: offering a reader a grip that cannot move anything is worse than
+    // offering nothing.
+    ...(drag ? [BlockDrag] : []),
     ...(collab
       ? [
           Collaboration.configure({ document: collab.ydoc, field: 'default' }),
@@ -226,6 +231,7 @@ export default function Editor({
         collab,
         me,
         vim: vimEnabled,
+        drag: Boolean(editable),
       }),
     // ydoc/provider identity, not the session object: the session re-wraps on
     // every connection-status change and rebuilding the list would be pointless.

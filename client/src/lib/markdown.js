@@ -32,8 +32,10 @@ export function markdownToJSON(md) {
   });
   const json = editor.getJSON();
   editor.destroy();
-  // ```mermaid / ```drawio fences are diagrams, not code — the headless editor
-  // above has no diagram extensions, so promote them on the way out.
+  // The headless editor above has no diagram extensions — it has no DOM to
+  // render into — so ```mermaid and ```drawio fences come out of it as code
+  // blocks. The server normalises that on write, but the imported document is
+  // also shown before it round-trips, so convert here too and let the two agree.
   return hydrateDiagramBlocks(json);
 }
 

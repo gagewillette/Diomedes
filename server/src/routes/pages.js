@@ -5,7 +5,7 @@ import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '..
 import { searchPages, notePageChanged } from '../search/index.js';
 import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
-import { movePage } from '../lib/pageMove.js';
+import { movePage, siblingOrderKeys } from '../lib/pageMove.js';
 import { writePageBody } from '../lib/pageBody.js';
 import { generateKeyBetween } from '../lib/orderKey.js';
 import { publish, spaceAudience } from '../lib/events.js';
@@ -259,6 +259,24 @@ router.patch(
       userId: req.user.id,
     });
     notePageChanged(written.page.id, written.page.updated_at, written.changedBlockIds);
+
+    // A body written through an API token — the MCP server, a script — is a
+    // wholesale replacement that the CRDT cannot express as an edit, exactly
+    // like a version restore. If the page was ever opened in the editor, its
+    // stored ydoc still holds the old document and would be handed back to the
+    // next reader, so the write looks like it silently did nothing. Drop the
+    // doc and let the next client reseed from the JSON we just stored.
+    //
+    // Session-authenticated PATCHes are the editor's own snapshot writes and
+    // must not do this: the CRDT there is the source they came from.
+    if (content !== undefined && req.user.viaToken) {
+      await q('DELETE FROM page_ydoc WHERE page_id = $1', [page.id]);
+      await q(
+        'UPDATE pages SET collab_seeded = false, collab_seed_claimed_at = NULL WHERE id = $1',
+        [page.id]
+      );
+      await getHub()?.resetPage(page.id);
+    }
 
     if (content !== undefined) await syncPageLinks(page.id, written.content, page.space_id);
     if (title !== undefined && title !== page.title) {
@@ -544,6 +562,157 @@ router.post(
     });
 
     res.json({ ok: true, spaceId: result.toSpaceId, spaceSlug: result.spaceSlug, orderKey: result.orderKey });
+  })
+);
+
+// ---- moving and trashing a whole selection at once ----
+
+// The endpoint behind a multi-select drag.
+//
+// Every page still goes through `movePage`, so there is exactly one definition
+// of what moving a page means. What this adds is the two things a batch needs
+// and a loop over `/pages/:id/move` could not give it:
+//
+//   * the destination gap is cut into `pageIds.length` order keys *before* the
+//     first page is written, so the pages land in the order they were sent
+//     instead of every one of them measuring the same gap and landing on top of
+//     the last. `pageIds` arrives in the order the pages read in the tree, which
+//     is how a selection keeps its shape across a drop.
+//   * the batch is checked as a whole first. Refusing the fourth page of four
+//     halfway through would leave the tree in a state nobody asked for and the
+//     client with nothing to undo it with.
+router.post(
+  '/pages/move-many',
+  asyncRoute(async (req, res) => {
+    const { parentId = null, spaceId = null } = req.body || {};
+    const pageIds = req.body?.pageIds;
+    const index = req.body?.index;
+    if (!Array.isArray(pageIds) || !pageIds.length) {
+      throw httpError(400, 'pageIds must be a non-empty array');
+    }
+    if (new Set(pageIds).size !== pageIds.length) throw httpError(400, 'pageIds must not repeat');
+    if (index !== undefined && index !== null && !Number.isInteger(index)) {
+      throw httpError(400, 'index must be a whole number');
+    }
+
+    const pages = [];
+    for (const id of pageIds) pages.push(await getPage(id));
+    for (const sourceSpaceId of new Set(pages.map((p) => p.space_id))) {
+      await assertSpaceRole(req.user, sourceSpaceId, 'writer');
+    }
+    const targetSpaceId = spaceId || pages[0].space_id;
+    await assertSpaceRole(req.user, targetSpaceId, 'writer');
+
+    if (parentId) {
+      if (pageIds.includes(parentId)) throw httpError(400, 'Cannot move a page inside itself');
+      const { rows: parent } = await q(
+        'SELECT id, space_id, parent_id FROM pages WHERE id = $1 AND deleted_at IS NULL',
+        [parentId]
+      );
+      if (!parent[0]) throw httpError(404, 'Parent page not found');
+      if (parent[0].space_id !== targetSpaceId) {
+        throw httpError(400, 'Parent page is in a different space');
+      }
+      assertCanTakeChildren(parent[0]);
+      // One level deep, for the batch as well as for one page: nothing carrying
+      // subpages of its own can become a subpage.
+      const { rows: withKids } = await q(
+        'SELECT 1 FROM pages WHERE parent_id = ANY($1::uuid[]) AND deleted_at IS NULL LIMIT 1',
+        [pageIds]
+      );
+      if (withKids.length) throw httpError(400, 'A page with subpages cannot itself become a subpage');
+    }
+
+    // Siblings as the destination will look with the whole selection lifted out
+    // — not just the page currently being written, which is what the
+    // single-page path measures. A page already sitting in this list would
+    // otherwise be measured against the slot it is about to vacate.
+    const { rows: siblings } = await q(
+      `SELECT id, order_key FROM pages
+       WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2
+         AND deleted_at IS NULL AND NOT (id = ANY($3::uuid[]))
+       ORDER BY order_key, created_at`,
+      [targetSpaceId, parentId, pageIds]
+    );
+    const slot = Number.isInteger(index) ? index : siblings.length;
+    const keys = siblingOrderKeys(siblings, slot, pages.length);
+
+    const results = [];
+    for (const [i, page] of pages.entries()) {
+      results.push(await movePage({ page, parentId, spaceId: targetSpaceId, orderKey: keys[i] }));
+    }
+
+    const movedIds = results.flatMap((r) => r.movedIds);
+    const rewrittenIds = results.flatMap((r) => r.rewrittenIds);
+    const crossSpace = results.some((r) => r.crossSpace);
+
+    // Same link repair as a single move, run for each page that actually
+    // changed space; see the note on `/pages/:id/move` for why it lives outside
+    // the move's own transaction.
+    for (const result of results) {
+      if (!result.crossSpace) continue;
+      for (const movedId of result.movedIds) {
+        const moved = await getPage(movedId);
+        await syncPageLinks(moved.id, moved.content, moved.space_id);
+        await resolveLinksByTitle(moved);
+      }
+    }
+
+    const audienceBySpace = new Map();
+    for (const id of new Set([...results.map((r) => r.fromSpaceId), targetSpaceId])) {
+      audienceBySpace.set(id, await spaceAudience(id));
+    }
+    for (const [id, userIds] of audienceBySpace) {
+      publish({ type: 'pages-changed', spaceId: id, userIds });
+    }
+
+    const linkAudiences = await Promise.all(
+      [...new Set(await spaceIdsOfPages(rewrittenIds))].map((id) => spaceAudience(id))
+    );
+    publish({
+      type: 'page-moved',
+      pageIds: movedIds,
+      spaceId: targetSpaceId,
+      spaceSlug: results[0].spaceSlug,
+      crossSpace,
+      userIds: [...new Set([...[...audienceBySpace.values()].flat(), ...linkAudiences.flat()])],
+    });
+
+    res.json({
+      ok: true,
+      spaceId: targetSpaceId,
+      spaceSlug: results[0].spaceSlug,
+      moved: pages.length,
+    });
+  })
+);
+
+// The endpoint behind "move N pages to trash". One statement rather than one
+// request per page: a selection that is half in the trash is a state nobody
+// asked for and the confirmation dialog did not describe.
+router.post(
+  '/pages/delete-many',
+  asyncRoute(async (req, res) => {
+    const pageIds = req.body?.pageIds;
+    if (!Array.isArray(pageIds) || !pageIds.length) {
+      throw httpError(400, 'pageIds must be a non-empty array');
+    }
+    const ids = [...new Set(pageIds)];
+    const pages = [];
+    for (const id of ids) pages.push(await getPage(id));
+    for (const spaceId of new Set(pages.map((p) => p.space_id))) {
+      await assertSpaceRole(req.user, spaceId, 'writer');
+    }
+    // Subpages go with their parents, exactly as the single-page delete does —
+    // and a subpage that was *also* selected is simply already in the set.
+    const { rowCount } = await q(
+      `WITH RECURSIVE sub AS (
+         SELECT id FROM pages WHERE id = ANY($1::uuid[])
+         UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NULL
+       ) UPDATE pages SET deleted_at = now() WHERE id IN (SELECT id FROM sub)`,
+      [ids]
+    );
+    res.json({ ok: true, trashed: rowCount });
   })
 );
 

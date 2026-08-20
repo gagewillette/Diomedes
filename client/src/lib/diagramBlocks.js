@@ -11,6 +11,17 @@
 const BLOCK_ID_ATTR = 'blockId';
 
 const DRAWIO_LANGS = new Set(['drawio', 'draw.io', 'mxgraph', 'mxfile']);
+const MERMAID_LANGS = new Set(['mermaid', 'mmd']);
+
+// Info strings carry more than a language — ```mermaid title="flow" is valid.
+// Only the first token names the language. Mirrors isMermaidLanguage in
+// server/src/lib/diagrams.js.
+function language(node) {
+  return String(node.attrs?.language || '')
+    .trim()
+    .split(/[\s,{:]/)[0]
+    .toLowerCase();
+}
 
 /** Does this text look like a draw.io (mxGraph) document? */
 export function isDrawioXml(text) {
@@ -25,12 +36,12 @@ function convert(node) {
   if (!node || typeof node !== 'object') return node;
 
   if (node.type === 'codeBlock') {
-    const lang = String(node.attrs?.language || '').toLowerCase();
+    const lang = language(node);
     const code = codeBlockText(node);
     // The block keeps its identity across the swap — it is the same block.
     const blockId = node.attrs?.[BLOCK_ID_ATTR];
     const keepId = blockId ? { [BLOCK_ID_ATTR]: blockId } : {};
-    if (lang === 'mermaid') return { type: 'mermaidDiagram', attrs: { ...keepId, code } };
+    if (MERMAID_LANGS.has(lang)) return { type: 'mermaidDiagram', attrs: { ...keepId, code } };
     // An unlabelled or generically labelled fence still counts if the body is
     // unmistakably mxGraph XML — that is how most callers send a diagram.
     if (DRAWIO_LANGS.has(lang) || isDrawioXml(code)) {

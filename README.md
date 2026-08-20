@@ -5,8 +5,8 @@ scratch. React + Mantine + TipTap frontend, Express + PostgreSQL + Redis backend
 shipped as a single versioned Docker image.
 
 **Editor**: markdown paste with auto-formatting, markdown typing shortcuts, slash
-commands, Word-style smooth caret, tables, task lists, syntax-highlighted code, KaTeX
-math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads,
+commands, drag-handle block reordering, Word-style smooth caret, tables, task
+lists, syntax-highlighted code, KaTeX math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads,
 **PDF and PowerPoint documents** — and three integrated diagram editors:
 **Mermaid**, **Excalidraw**, and **Draw.io**.
 
@@ -45,7 +45,7 @@ for Draw.io. Both are drawn in the page exactly as if they had been made here.
 diomedes/
 ├── client/            # React SPA (Vite, Mantine UI, TipTap editor)
 ├── server/            # Express API (ESM, no build step)
-├── scripts/release.sh # tags a release; GitHub Actions builds & publishes
+├── scripts/           # bump-version.sh (versioning), release.sh (manual release)
 ├── Dockerfile         # multi-stage: build client → install server deps → runtime
 └── docker-compose.example.yml  # diomedes + postgres + redis + watchtower
 ```
@@ -170,15 +170,46 @@ it.
 
 ## Versioning & releases
 
-Pushing to `main` builds and publishes `ghcr.io/gagewillette/diomedes:latest`.
-Tagging cuts a semver release:
+Versions bump themselves. Pushing to `main` runs
+`.github/workflows/docker-publish.yml`, which works out the bump, commits it,
+tags the commit, and publishes the image. There is nothing to do by hand.
+
+Three versions are tracked, and the two component versions are meant to drift
+apart:
+
+| File | Meaning | Bumps when |
+| --- | --- | --- |
+| `package.json` | the **release** — what the image is tagged with | anything in `server/`, `client/`, or the `Dockerfile` changes |
+| `server/package.json` | the server component | `server/` changes |
+| `client/package.json` | the client component | `client/` changes |
+
+A client-only change moves the client and leaves the server where it is, so the
+two diverge over time — that is the point. The release version is the one that
+has to stay coherent, because the server and the built client ship inside a
+single image.
+
+**Bump size** comes from the commit messages since the last `v*` tag. The
+default is a patch. Say `[minor]` or use a `feat:` subject for a minor;
+`[major]`, `BREAKING CHANGE`, or a `feat!:` subject for a major. The largest
+bump in the range wins.
 
 ```bash
-# bump "version" in server/ and client/ package.json, commit, then:
-./scripts/release.sh        # tags v1.1.0 and pushes; Actions does the build
+./scripts/bump-version.sh              # dry run — what would the next push do?
+./scripts/bump-version.sh --apply      # apply it locally (CI does this for you)
 ```
 
-Published tags: `:latest` (default branch), `:1.1.0`, `:1.1`, `:sha-abc1234`.
+Each release pushes a `v<release>` tag, plus `server-v<x.y.z>` / `client-v<x.y.z>`
+tags for whichever component actually moved. Published image tags: `:latest`
+(default branch), `:1.2.0`, `:1.2`, `:sha-abc1234`.
+
+`./scripts/release.sh` still exists as an escape hatch for cutting a release by
+hand — re-releasing an old commit, or forcing a specific version.
+
+> The bump commit is pushed to `main` by `GITHUB_TOKEN`. If you ever put branch
+> protection on `main`, give the Actions bot a bypass or the push will be
+> rejected. That token deliberately cannot trigger workflows, which is why the
+> bump and the build live in one workflow rather than two — and why this cannot
+> loop.
 
 ## Auto-deployment
 

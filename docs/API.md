@@ -38,6 +38,7 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}, performance: {logging, sampleRate}}}` — any member |
+| PATCH | `/api/workspace/settings/name` | `{name}` — renames the workspace, admin/owner only. Trimmed, required, 64 characters max. Pushed to every browser over SSE |
 | PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
 | PATCH | `/api/workspace/settings/performance` | `{performance: {logging?: bool, sampleRate?: 0..1}}`, admin/owner only. `logging: false` stops all sample collection, client and server |
 | GET | `/api/workspace/info` | Workspace inventory: content counts, 7-day activity, per-space breakdown, storage (attachments, disk, database, per-table) and runtime (node, uptime, memory, db pool, search mode). Admin/owner only |
@@ -82,6 +83,17 @@ usually has no way to produce a picture, so the client renders one on first view
 and writes it back to the node. Send `{"xml": "…", "svg": ""}` and the page draws
 the same diagram it would have drawn had someone made it in the editor.
 
+Mermaid diagrams are normalised on write: a `codeBlock` whose language is
+mermaid (case-insensitive, `mmd` included, info-string attributes ignored) is
+stored as a `mermaidDiagram{code}` node, as is an unlabelled code block whose
+body opens with a mermaid declaration (`graph TD`, `sequenceDiagram`, …). A
+client that sends markdown-derived JSON therefore gets a rendered, editable
+diagram rather than raw source in a code block. Draw.io code blocks are
+normalised the same way: a ```` ```drawio ```` fence (also `draw.io`, `mxgraph`),
+or an unlabelled fence whose body opens with `<mxfile>`/`<mxGraphModel>`, is
+stored as a `drawioDiagram{xml}`. A fence that names some other language is left
+alone in both cases — a code block someone chose is a code block.
+
 Every block-level node carries a `blockId` attribute. Clients that write documents
 are not required to supply one — the server mints ids for any block arriving
 without them and stores them back into the document — but a client that *does*
@@ -95,11 +107,13 @@ document with ids stripped makes every block look new. See
 | GET | `/api/spaces/:id/pages` | Tree metadata (id, parent_id, title, icon, order_key, rev), ordered by `order_key` |
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
-| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex |
+| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex. Sent with an API token (MCP, scripts) it also drops the page's collaborative document, so the next reader rebuilds it from the JSON just written instead of being served the pre-write CRDT |
 | GET | `/api/pages/:id/blocks` | `{rev, blocks[]}` — the page's blocks in document order |
 | GET | `/api/pages/:id/delta?since=N` | What changed since revision `N`: `{rev, full, blocks[], deleted[], order[]}`. `full: true` means the gap is too wide to answer incrementally — refetch the page. |
 | POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, orderKey?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `orderKey` is an explicit sort key for clients that compute one. A numeric `position` is still accepted and read as a slot index. |
+| POST | `/api/pages/move-many` | `{pageIds[], parentId?, spaceId?, index?}` — moves a whole selection into one slot. `pageIds` is in the order the pages should end up; the destination gap is split into that many order keys before anything is written, so the batch keeps its order. The batch is validated as a whole first, so a drop that breaks the nesting rule is refused entirely rather than half applied. |
 | DELETE | `/api/pages/:id` | Soft-delete subtree (trash) |
+| POST | `/api/pages/delete-many` | `{pageIds[]}` — soft-delete several subtrees in one statement; returns `{trashed}`, the number of pages that went to the trash including subpages |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |
 | GET | `/api/spaces/:id/trash` | |

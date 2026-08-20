@@ -8,6 +8,10 @@ import { q } from '../db.js';
 
 export const DEFAULT_WORKSPACE_NAME = 'Diomedes';
 
+// The name shows up in the header, on the login screen and on public share
+// pages, so it stays short enough to render in all three.
+export const WORKSPACE_NAME_MAX = 64;
+
 // Performance logging is separate from data savings: it is a diagnostics
 // switch, not a bandwidth one, and it is the only workspace flag that governs
 // whether we write rows about our own users.
@@ -71,6 +75,22 @@ export async function setDataSavings(patch) {
       ...(typeof patch?.fileUploads === 'boolean' ? { fileUploads: patch.fileUploads } : {}),
     },
   };
+  await q(
+    `INSERT INTO settings (key, value) VALUES ('workspace', $1)
+     ON CONFLICT (key) DO UPDATE SET value = $1`,
+    [next]
+  );
+  return next;
+}
+
+/**
+ * Rename the workspace, leaving every other key in the blob untouched. The name
+ * is trimmed and length-checked by the caller; a blank one is rejected there
+ * rather than silently falling back to the default.
+ */
+export async function setWorkspaceName(name) {
+  const current = await getWorkspace();
+  const next = { ...current, name: name.trim() };
   await q(
     `INSERT INTO settings (key, value) VALUES ('workspace', $1)
      ON CONFLICT (key) DO UPDATE SET value = $1`,
