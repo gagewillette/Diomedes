@@ -9,7 +9,9 @@ import TableHeader from '@tiptap/extension-table-header';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
+import Document from '@tiptap/extension-document';
 import { BlockId } from '../editor/blockId.js';
+import { FootnoteExtensions } from '../editor/nodes/Footnote.jsx';
 import { hydrateDiagramBlocks } from './diagramBlocks.js';
 
 // Parse a markdown string into TipTap JSON using a throwaway headless editor.
@@ -17,11 +19,16 @@ export function markdownToJSON(md) {
   const editor = new Editor({
     element: document.createElement('div'),
     extensions: [
-      StarterKit,
+      // Same content expression the real editor uses. Without it the parsed
+      // footnote container has nowhere to go and markdown-it's work is thrown
+      // away silently — every imported note lost, with no error to notice.
+      Document.extend({ content: 'block+ footnotes?' }),
+      StarterKit.configure({ document: false }),
       Link,
       Image,
       Table, TableRow, TableCell, TableHeader,
       TaskList, TaskItem,
+      ...FootnoteExtensions,
       Markdown.configure({ html: false }),
       // Imported markdown becomes real blocks the moment it lands, rather than
       // waiting for someone to open the page and edit it. Without this the MCP
