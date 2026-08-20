@@ -15,51 +15,35 @@
 //   * `[[wiki links]]` pointing at a moved page keep resolving: id-carrying
 //     links are rewritten to the new space slug, and title-matched links
 //     (which are scoped to a space) are re-resolved on both sides,
-//   * the sibling ordering stays sane, including when fractional positions
-//     have been squeezed flat by many drops into the same gap.
+//   * the sibling ordering stays sane however many times pages have been
+//     dropped into the same gap.
 import { pool } from '../db.js';
 import { httpError } from './util.js';
 import { PAGE_LINK_NODE } from './links.js';
-
-// New siblings are spaced this far apart when a list is renumbered, leaving
-// room for around thirty drops into the *same* gap before halving runs out of
-// double precision — well past anything done by hand, and `needsRenumber`
-// catches the case that gets there anyway.
-export const POSITION_GAP = 1000;
-
-// Below this the midpoint between two neighbours stops being a distinct double,
-// and the drop would silently land on top of its neighbour.
-const MIN_GAP = 1e-6;
+import { isOrderKey, keyForSlot } from './orderKey.js';
 
 /**
  * Where to place a page dropped at `index` among `siblings`.
  *
  * `siblings` is the destination's child list *without* the page being moved,
- * ordered by position; `index` is the slot it should occupy afterwards. The
- * result is a fractional position between its new neighbours, so a drop writes
- * one row instead of renumbering the list.
+ * ordered by their keys; `index` is the slot it should occupy afterwards. The
+ * result is a key between its new neighbours, so a drop writes one row instead
+ * of renumbering the list.
  *
- * When the neighbours have drifted too close together to fit a value between
- * them, `needsRenumber` asks the caller to respread the list first — the
- * fallback that keeps repeated drops into the same gap from collapsing.
+ * This replaces `siblingPosition`, which returned a float and a `needsRenumber`
+ * flag. The flag existed because the encoding could fail: doubles run out of
+ * distinct midpoints after ~50 drops into one gap, and the caller had to notice
+ * and respread the whole list to recover. There is nothing to notice now — a
+ * string index always has room, so a drop is always one row, and the respread
+ * path and its `MIN_GAP` floor are gone with it.
+ *
+ * That is not a hypothetical repair. Drag-and-drop page moves (PR #18) shipped
+ * onto the float encoding, so every drop into an already-tight gap was one step
+ * closer to two pages sharing a position and the tree ordering going undefined.
  */
-export function siblingPosition(siblings, index) {
-  const at = Math.max(0, Math.min(index, siblings.length));
-  const before = at > 0 ? siblings[at - 1].position : null;
-  const after = at < siblings.length ? siblings[at].position : null;
-
-  if (before === null && after === null) return { position: POSITION_GAP, needsRenumber: false };
-  if (before === null) return { position: after - POSITION_GAP, needsRenumber: false };
-  if (after === null) return { position: before + POSITION_GAP, needsRenumber: false };
-
-  const gap = after - before;
-  if (gap <= MIN_GAP) return { position: before, needsRenumber: true };
-  return { position: before + gap / 2, needsRenumber: false };
+export function siblingOrderKey(siblings, index) {
+  return keyForSlot(siblings, index);
 }
-
-/** Evenly spaced positions for a list that has been squeezed flat. */
-export const respreadPositions = (count) =>
-  Array.from({ length: count }, (_, i) => (i + 1) * POSITION_GAP);
 
 /**
  * Rewrite the `spaceSlug` carried by every `pageLink` node whose target is in
@@ -110,14 +94,14 @@ export function rewriteLinkSlugs(node, slugById) {
  * new siblings. Runs as one transaction: a half-applied move would leave pages
  * pointing at a parent in another space.
  *
- * `position` is the older, lower-level way to say the same thing — an explicit
- * sort key, still honoured for API clients that compute one themselves.
+ * `orderKey` is the lower-level way to say the same thing — an explicit sort
+ * key, still honoured for API clients that compute one themselves.
  *
  * Returns what the caller needs in order to notify everyone: the ids that
  * changed space, the ids whose stored content was rewritten, and the
  * destination slug.
  */
-export async function movePage({ page, parentId, spaceId, index, position: explicitPosition }) {
+export async function movePage({ page, parentId, spaceId, index, orderKey: explicitKey }) {
   const targetSpaceId = spaceId || page.space_id;
   const crossSpace = targetSpaceId !== page.space_id;
   const conn = await pool.connect();
@@ -177,31 +161,22 @@ export async function movePage({ page, parentId, spaceId, index, position: expli
     // Siblings as they will be *after* the move, so an in-place reorder measures
     // gaps against the list the page is about to rejoin, not the one it left.
     const { rows: siblings } = await conn.query(
-      `SELECT id, position FROM pages
+      `SELECT id, order_key FROM pages
        WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2
          AND deleted_at IS NULL AND id <> $3
-       ORDER BY position, created_at`,
+       ORDER BY order_key, created_at`,
       [targetSpaceId, parentId, page.id]
     );
 
     const slot = Number.isInteger(index) ? index : siblings.length;
-    let { position, needsRenumber } = Number.isFinite(explicitPosition)
-      ? { position: explicitPosition, needsRenumber: false }
-      : siblingPosition(siblings, slot);
-    if (needsRenumber) {
-      const spread = respreadPositions(siblings.length);
-      for (let i = 0; i < siblings.length; i++) {
-        await conn.query('UPDATE pages SET position = $1 WHERE id = $2', [spread[i], siblings[i].id]);
-      }
-      ({ position } = siblingPosition(
-        siblings.map((sibling, i) => ({ ...sibling, position: spread[i] })),
-        slot
-      ));
-    }
+    // One statement, always. The float version could reach here needing to
+    // rewrite every sibling row first, which meant a drop into a crowded gap
+    // cost O(siblings) writes and briefly reordered pages nobody had touched.
+    const orderKey = isOrderKey(explicitKey) ? explicitKey : siblingOrderKey(siblings, slot);
 
-    await conn.query('UPDATE pages SET parent_id = $1, position = $2, space_id = $3 WHERE id = $4', [
+    await conn.query('UPDATE pages SET parent_id = $1, order_key = $2, space_id = $3 WHERE id = $4', [
       parentId,
-      position,
+      orderKey,
       targetSpaceId,
       page.id,
     ]);
@@ -231,7 +206,7 @@ export async function movePage({ page, parentId, spaceId, index, position: expli
       toSpaceId: targetSpaceId,
       crossSpace,
       parentId,
-      position,
+      orderKey,
     };
   } catch (err) {
     await conn.query('ROLLBACK').catch(() => {});

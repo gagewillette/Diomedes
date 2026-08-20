@@ -1,11 +1,13 @@
 import { Router } from 'express';
-import { q } from '../db.js';
+import { q, pool } from '../db.js';
 import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
 import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
 import { movePage } from '../lib/pageMove.js';
+import { writePageBody } from '../lib/pageBody.js';
+import { generateKeyBetween } from '../lib/orderKey.js';
 import { publish, spaceAudience } from '../lib/events.js';
 
 const router = Router();
@@ -40,8 +42,8 @@ router.get(
   asyncRoute(async (req, res) => {
     await assertSpaceRole(req.user, req.params.spaceId, 'reader');
     const { rows } = await q(
-      `SELECT id, parent_id, title, icon, position, updated_at FROM pages
-       WHERE space_id = $1 AND deleted_at IS NULL ORDER BY position, created_at`,
+      `SELECT id, parent_id, title, icon, order_key, rev, updated_at FROM pages
+       WHERE space_id = $1 AND deleted_at IS NULL ORDER BY order_key, created_at`,
       [req.params.spaceId]
     );
     res.json({ pages: rows });
@@ -144,29 +146,56 @@ router.post(
       if (parent.space_id !== spaceId) throw httpError(400, 'Parent page is in a different space');
       assertCanTakeChildren(parent);
     }
-    const { rows: pos } = await q(
-      `SELECT COALESCE(MAX(position), 0) + 1000 AS next FROM pages
-       WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL`,
-      [spaceId, parentId]
-    );
     // Importing writes the body here rather than PATCHing it a moment later, so
     // the page is never observable — by the editor, by search, by another
-    // client — in a half-created state with an empty body.
+    // client — in a half-created state with an empty body. Blocks are projected
+    // inside the same transaction for the same reason: a page that exists with
+    // a body but no rows in page_blocks would be invisible to the delta
+    // endpoint and to block-scoped embedding until its next save.
     const hasContent = content !== undefined && content !== null;
-    const body = hasContent ? content : EMPTY_DOC;
-    const text = hasContent ? extractText(content) : '';
-    const { rows } = await q(
-      `INSERT INTO pages (space_id, parent_id, title, position, created_by, updated_by,
-                          content, text_content, tsv)
-       VALUES ($1, $2, $3, $4, $5, $5,
-               $6::jsonb, $7, ${TSV_SQL.replace('$1', '$3').replace('$2', '$7')})
-       RETURNING *`,
-      [spaceId, parentId, title, pos[0].next, req.user.id, JSON.stringify(body), text]
-    );
-    notePageChanged(rows[0].id, rows[0].updated_at);
-    if (title) await resolveLinksByTitle(rows[0]);
-    if (hasContent) await syncPageLinks(rows[0].id, content, spaceId);
-    res.status(201).json({ page: rows[0] });
+    const conn = await pool.connect();
+    let page;
+    let changedBlockIds = [];
+    try {
+      await conn.query('BEGIN');
+      const { rows: last } = await conn.query(
+        `SELECT order_key FROM pages
+         WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL
+         ORDER BY order_key DESC LIMIT 1`,
+        [spaceId, parentId]
+      );
+      const orderKey = generateKeyBetween(last[0]?.order_key ?? null, null);
+      const { rows } = await conn.query(
+        `INSERT INTO pages (space_id, parent_id, title, order_key, created_by, updated_by,
+                            content, text_content, tsv)
+         VALUES ($1, $2, $3, $4, $5, $5,
+                 $6::jsonb, $7, ${TSV_SQL.replace('$1', '$3').replace('$2', '$7')})
+         RETURNING *`,
+        [spaceId, parentId, title, orderKey, req.user.id, JSON.stringify(EMPTY_DOC), '']
+      );
+      page = rows[0];
+      if (hasContent) {
+        const written = await writePageBody({
+          pageId: page.id,
+          content,
+          userId: req.user.id,
+          conn,
+        });
+        page = { ...page, ...written.page, content: written.content };
+        changedBlockIds = written.changedBlockIds;
+      }
+      await conn.query('COMMIT');
+    } catch (err) {
+      await conn.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+    notePageChanged(page.id, page.updated_at, changedBlockIds);
+    if (title) await resolveLinksByTitle(page);
+    if (hasContent) await syncPageLinks(page.id, page.content, spaceId);
+    res.status(201).json({ page });
   })
 );
 
@@ -216,19 +245,22 @@ router.patch(
       }
     }
 
-    const newTitle = title !== undefined ? title : page.title;
-    const newContent = content !== undefined ? content : page.content;
-    const text = content !== undefined ? extractText(newContent) : page.text_content;
-    const { rows } = await q(
-      `UPDATE pages SET title = $3, icon = COALESCE($4, icon), content = $5, text_content = $6,
-              tsv = ${TSV_SQL.replace('$1', '$3').replace('$2', '$6')},
-              updated_by = $2, updated_at = now()
-       WHERE id = $1 RETURNING id, title, icon, updated_at`,
-      [page.id, req.user.id, newTitle, icon, JSON.stringify(newContent), text]
-    );
-    notePageChanged(rows[0].id, rows[0].updated_at);
+    // The legacy whole-body write, kept as-is from the caller's point of view
+    // and internally converted into a block diff. This is what lets the MCP
+    // server, the collaboration snapshot writer and every existing API client
+    // keep working unchanged through the migration — writePageBody works out
+    // which blocks actually moved, so a client that resends an entire document
+    // still only costs what it really changed.
+    const written = await writePageBody({
+      pageId: page.id,
+      content,
+      title,
+      icon,
+      userId: req.user.id,
+    });
+    notePageChanged(written.page.id, written.page.updated_at, written.changedBlockIds);
 
-    if (content !== undefined) await syncPageLinks(page.id, newContent, page.space_id);
+    if (content !== undefined) await syncPageLinks(page.id, written.content, page.space_id);
     if (title !== undefined && title !== page.title) {
       // A rename can both attract dangling links and orphan ones that had
       // adopted the old title.
@@ -236,6 +268,100 @@ router.patch(
       await unresolveStaleTitleLinks({ id: page.id, title: newTitle });
     }
     res.json({ page: rows[0] });
+  })
+);
+
+// ---- blocks ----
+
+// How long a deleted block's tombstone is kept. A cache further behind than
+// this refetches the whole document instead, which the endpoint tells it to do
+// by answering `full: true` rather than by silently omitting the deletion.
+const BLOCK_TOMBSTONE_TTL_DAYS = 30;
+
+// The page's blocks in document order — the projection, read back.
+//
+// A reader that wants the whole page still uses GET /pages/:id and its single
+// jsonb column; this is for anything that works block by block.
+router.get(
+  '/pages/:id/blocks',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const { rows } = await q(
+      `SELECT block_id, type, content, order_key, hash, rev, updated_at
+       FROM page_blocks WHERE page_id = $1 ORDER BY order_key`,
+      [page.id]
+    );
+    res.json({ rev: Number(page.rev), blocks: rows });
+  })
+);
+
+// What changed on this page since revision `since`.
+//
+// This is the endpoint the local-first cache is built on, and the reason
+// `page_blocks.rev` records the revision of each block's own last change
+// rather than the page's: a client holding revision 40 of a forty-block page
+// asks what moved and is told about the one paragraph that did, instead of
+// being sent the document again.
+//
+// Three answers are possible, and the distinction between the second and third
+// is the one that matters:
+//
+//   * `since` is current — nothing changed, an empty delta.
+//   * `since` is recent — the changed blocks, plus the ids of any deleted
+//     since then, read from the tombstone table because a deletion leaves no
+//     row to find.
+//   * `since` is older than the tombstone horizon, or from a different page's
+//     history — `full: true`, meaning "this cannot be answered incrementally,
+//     refetch". Saying so explicitly is the point: silently returning a
+//     partial delta would leave the client rendering a block that no longer
+//     exists, with nothing to ever correct it.
+router.get(
+  '/pages/:id/delta',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const rev = Number(page.rev);
+    const since = Number.parseInt(req.query.since, 10);
+
+    if (!Number.isFinite(since) || since < 0 || since > rev) {
+      // A `since` from the future is not a client being clever — it is a
+      // client that cached a page, the page was wiped and recreated with the
+      // same id, and its revisions started again. It has to start over.
+      return res.json({ rev, full: true, blocks: [], deleted: [] });
+    }
+    if (since === rev) return res.json({ rev, full: false, blocks: [], deleted: [] });
+
+    const { rows: horizon } = await q(
+      `SELECT 1 FROM page_block_tombstones
+       WHERE page_id = $1 AND rev > $2 AND deleted_at < now() - ($3 || ' days')::interval
+       LIMIT 1`,
+      [page.id, since, BLOCK_TOMBSTONE_TTL_DAYS]
+    );
+    if (horizon.length) return res.json({ rev, full: true, blocks: [], deleted: [] });
+
+    const { rows: blocks } = await q(
+      `SELECT block_id, type, content, order_key, hash, rev
+       FROM page_blocks WHERE page_id = $1 AND rev > $2 ORDER BY order_key`,
+      [page.id, since]
+    );
+    const { rows: deleted } = await q(
+      'SELECT block_id FROM page_block_tombstones WHERE page_id = $1 AND rev > $2',
+      [page.id, since]
+    );
+    res.json({
+      rev,
+      full: false,
+      blocks,
+      deleted: deleted.map((r) => r.block_id),
+      // Order keys only say how the changed blocks sort against each other. A
+      // client that deleted nothing and received nothing still needs to know
+      // where they go, so the full order comes along — it is one short string
+      // per block, far cheaper than the bodies it saves sending.
+      order: (
+        await q('SELECT block_id FROM page_blocks WHERE page_id = $1 ORDER BY order_key', [page.id])
+      ).rows.map((r) => r.block_id),
+    });
   })
 );
 
@@ -357,7 +483,13 @@ router.post(
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    const { parentId = null, spaceId = null, index, position } = req.body || {};
+    const { parentId = null, spaceId = null, orderKey } = req.body || {};
+    // `position` is what the MCP server sends, and its own description of the
+    // argument — "sort position among siblings" — is a slot, not the float the
+    // column used to hold. Accepting it as one keeps that client working
+    // untouched across the migration rather than silently appending every
+    // move to the end of the list.
+    const index = req.body?.index ?? req.body?.position;
 
     const targetSpaceId = spaceId || page.space_id;
     if (targetSpaceId !== page.space_id) await assertSpaceRole(req.user, targetSpaceId, 'writer');
@@ -365,7 +497,7 @@ router.post(
       throw httpError(400, 'index must be a whole number');
     }
 
-    const result = await movePage({ page, parentId, spaceId: targetSpaceId, index, position });
+    const result = await movePage({ page, parentId, spaceId: targetSpaceId, index, orderKey });
 
     if (result.crossSpace) {
       // Outside the move's transaction on purpose: this is the same link
@@ -411,7 +543,7 @@ router.post(
       userIds: [...new Set([...fromAudience, ...toAudience, ...linkAudiences.flat()])],
     });
 
-    res.json({ ok: true, spaceId: result.toSpaceId, spaceSlug: result.spaceSlug, position: result.position });
+    res.json({ ok: true, spaceId: result.toSpaceId, spaceSlug: result.spaceSlug, orderKey: result.orderKey });
   })
 );
 
@@ -519,14 +651,22 @@ router.post(
       page.content,
       req.user.id,
     ]);
-    const text = extractText(version.content);
-    const { rows: restored } = await q(
-      `UPDATE pages SET title = $2, content = $3, text_content = $4,
-              tsv = ${TSV_SQL.replace('$1', '$2').replace('$2', '$4')},
-              updated_by = $5, updated_at = now() WHERE id = $1 RETURNING id, updated_at`,
-      [page.id, version.title, JSON.stringify(version.content), text, req.user.id]
-    );
-    notePageChanged(restored[0].id, restored[0].updated_at);
+    // A restore is a whole-document write like any other, so it goes down the
+    // same path — which reprojects blocks, tombstones the ones the old
+    // revision had that this one does not, and bumps `rev` so every cache
+    // holding the newer document is told to come back for this one.
+    //
+    // Blocks that exist in both revisions keep their ids and their `rev`,
+    // because their content hash is unchanged. That is worth more than it
+    // sounds: restoring a version to undo an edit to one paragraph re-embeds
+    // that paragraph's chunk, not the entire page.
+    const written = await writePageBody({
+      pageId: page.id,
+      content: version.content,
+      title: version.title,
+      userId: req.user.id,
+    });
+    notePageChanged(written.page.id, written.page.updated_at, written.changedBlockIds);
     // A restore replaces the document wholesale, which the CRDT cannot express
     // as an edit. Drop the stored doc and the seed flag so the next client
     // rebuilds it from the restored JSON, and disconnect anyone still holding

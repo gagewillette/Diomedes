@@ -1,86 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { siblingPosition, respreadPositions, rewriteLinkSlugs, POSITION_GAP } from '../src/lib/pageMove.js';
+import { siblingOrderKey, rewriteLinkSlugs } from '../src/lib/pageMove.js';
+import { isOrderKey } from '../src/lib/orderKey.js';
 
-const siblings = (...positions) => positions.map((position, i) => ({ id: `p${i}`, position }));
+const siblings = (...keys) => keys.map((order_key, i) => ({ id: `p${i}`, order_key }));
 
 // ---- where a drop lands ----
+//
+// These used to assert around a `needsRenumber` flag and a respread fallback,
+// both of which existed because float positions could genuinely run out of
+// midpoints. Order keys cannot, so the fallback is gone and what is left to
+// test is simply that a drop lands where it was aimed — including after far
+// more drops into one gap than the float encoding could survive.
 
-test('the first page in an empty list gets a position with room on both sides', () => {
-  assert.deepEqual(siblingPosition([], 0), { position: POSITION_GAP, needsRenumber: false });
+test('the first page in an empty list gets a valid key', () => {
+  const key = siblingOrderKey([], 0);
+  assert.ok(isOrderKey(key), key);
 });
 
 test('dropping at the front lands before the current first page', () => {
-  const { position } = siblingPosition(siblings(1000, 2000), 0);
-  assert.ok(position < 1000);
+  assert.ok(siblingOrderKey(siblings('a1', 'a2'), 0) < 'a1');
 });
 
 test('dropping at the end lands after the current last page', () => {
-  const { position } = siblingPosition(siblings(1000, 2000), 2);
-  assert.ok(position > 2000);
+  assert.ok(siblingOrderKey(siblings('a1', 'a2'), 2) > 'a2');
 });
 
 test('dropping between two pages lands strictly between them', () => {
-  const { position, needsRenumber } = siblingPosition(siblings(1000, 2000), 1);
-  assert.equal(needsRenumber, false);
-  assert.ok(position > 1000 && position < 2000);
+  const key = siblingOrderKey(siblings('a1', 'a2'), 1);
+  assert.ok(key > 'a1' && key < 'a2');
 });
 
 test('an index past the end of the list is clamped rather than leaving a hole', () => {
-  const { position } = siblingPosition(siblings(1000), 99);
-  assert.ok(position > 1000);
+  assert.ok(siblingOrderKey(siblings('a1'), 99) > 'a1');
 });
 
 test('a negative index is clamped to the front', () => {
-  const { position } = siblingPosition(siblings(1000, 2000), -5);
-  assert.ok(position < 1000);
+  assert.ok(siblingOrderKey(siblings('a1', 'a2'), -5) < 'a1');
 });
 
-test('drops into the same gap keep their order, renumbering only once they must', () => {
-  // Twenty consecutive drops into the identical slot — far past anything a
-  // person does by hand — still resolve by halving, with no renumber.
-  let list = siblings(1000, 2000);
-  for (let i = 0; i < 20; i++) {
-    const { position, needsRenumber } = siblingPosition(list, 1);
-    assert.equal(needsRenumber, false, `renumber demanded after ${i} drops`);
-    assert.ok(position > list[0].position && position < list[1].position);
-    list = [list[0], { id: `new${i}`, position }, ...list.slice(1)];
+// The float version of this test had to stop at twenty and a second test had
+// to prove the renumbering fallback fired somewhere past fifty. There is no
+// fallback to fire now, so the only interesting number is a big one.
+test('two hundred drops into the same gap stay ordered, with no renumbering', () => {
+  let list = siblings('a1', 'a2');
+  for (let i = 0; i < 200; i++) {
+    const key = siblingOrderKey(list, 1);
+    assert.ok(key > list[0].order_key && key < list[1].order_key, `collapsed at drop ${i}`);
+    list = [list[0], { id: `new${i}`, order_key: key }, ...list.slice(1)];
   }
 });
 
-test('a gap halved past the limits of a double asks for a renumber and recovers', () => {
-  let list = siblings(1000, 2000);
-  let renumbers = 0;
-  for (let i = 0; i < 60; i++) {
-    let { position, needsRenumber } = siblingPosition(list, 1);
-    if (needsRenumber) {
-      renumbers += 1;
-      list = respreadPositions(list.length).map((p, n) => ({ id: list[n].id, position: p }));
-      ({ position } = siblingPosition(list, 1));
-    }
-    assert.ok(position > list[0].position && position < list[1].position, `collapsed at drop ${i}`);
-    list = [list[0], { id: `new${i}`, position }, ...list.slice(1)];
-  }
-  assert.ok(renumbers > 0, 'the renumber path was never exercised');
-});
-
-test('neighbours too close to fit a value between them ask for a renumber', () => {
-  const { needsRenumber } = siblingPosition(siblings(1000, 1000), 1);
-  assert.equal(needsRenumber, true);
-});
-
-test('respreadPositions hands back an ascending, evenly spaced list', () => {
-  assert.deepEqual(respreadPositions(3), [1000, 2000, 3000]);
-  assert.deepEqual(respreadPositions(0), []);
-});
-
-test('a respread list can then accept the drop that demanded it', () => {
-  const flat = siblings(1000, 1000, 1000);
-  assert.equal(siblingPosition(flat, 1).needsRenumber, true);
-  const spread = respreadPositions(flat.length).map((position, i) => ({ id: `p${i}`, position }));
-  const { position, needsRenumber } = siblingPosition(spread, 1);
-  assert.equal(needsRenumber, false);
-  assert.ok(position > 1000 && position < 2000);
+test('a drop is always one row: the siblings are never rewritten', () => {
+  const list = siblings('a1', 'a2', 'a3');
+  const before = list.map((s) => s.order_key);
+  siblingOrderKey(list, 1);
+  assert.deepEqual(list.map((s) => s.order_key), before);
 });
 
 // ---- repairing the links that point at a moved page ----
