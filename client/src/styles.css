@@ -320,3 +320,32 @@
   .mantine-AppShell-main { padding-left: 0 !important; }
   .gd-editor { min-height: 0; }
 }
+
+/* ---- Find in page ---- */
+.gd-findbar {
+  position: fixed;
+  top: 58px;
+  right: 24px;
+  z-index: 300;
+  background: var(--mantine-color-body);
+}
+@media (max-width: 640px) {
+  .gd-findbar { left: 12px; right: 12px; }
+}
+.gd-find-match {
+  background: var(--mantine-color-yellow-3);
+  color: var(--mantine-color-black);
+  border-radius: 2px;
+}
+[data-mantine-color-scheme='dark'] .gd-find-match {
+  background: var(--mantine-color-yellow-8);
+  color: var(--mantine-color-white);
+}
+.gd-find-match-active {
+  background: var(--mantine-color-orange-5);
+  box-shadow: 0 0 0 2px var(--mantine-color-orange-5);
+}
+[data-mantine-color-scheme='dark'] .gd-find-match-active {
+  background: var(--mantine-color-orange-7);
+  box-shadow: 0 0 0 2px var(--mantine-color-orange-7);
+}

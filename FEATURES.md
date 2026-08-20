@@ -41,6 +41,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ➖ v1 uses autosave (800 ms debounce), last-write-wins + full version history for recovery. Real-time CRDT sync is the one large omission |
 | Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
+| Find in page (Ctrl/⌘+F) | ✅ Overrides the browser's find — literal or regular-expression search with match counter, next/previous, case toggle and in-place highlighting; works on shared read-only pages too |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |
 | Semantic / AI search | ✅ Optional (`SEMANTIC_SEARCH_ENABLED`) — pgvector embeddings fused with full-text by reciprocal rank fusion, embedded in the background on save, falls back to full-text if the API is down |
 | Trash / restore pages | ✅ Soft-delete with per-space trash, restore, permanent delete |

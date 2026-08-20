@@ -17,6 +17,7 @@ import { downloadFile } from '../lib/markdown.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import HistoryModal from '../components/HistoryModal.jsx';
+import FindBar from '../components/FindBar.jsx';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
@@ -28,6 +29,7 @@ export default function PageEditor() {
   const [shareToken, setShareToken] = useState(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
   const saveTimer = useRef(null);
@@ -83,7 +85,7 @@ export default function PageEditor() {
     }, 500);
   };
 
-  // Ctrl+S → immediate save
+  // Ctrl+S → immediate save, Ctrl+F → in-document find (replacing the browser's)
   useEffect(() => {
     const handler = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -91,10 +93,20 @@ export default function PageEditor() {
         clearTimeout(saveTimer.current);
         saveContent(editorRef.current);
       }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'f') {
+        e.preventDefault();
+        setFindOpen(true);
+        // Pressing it again with the bar already open re-selects the query.
+        document.querySelector('.gd-findbar input')?.select();
+      }
+      if (e.key === 'Escape') setFindOpen(false);
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, [saveContent]);
+
+  // A find bar left open across page switches would show stale match counts.
+  useEffect(() => { setFindOpen(false); }, [pageId]);
 
   // flush pending save on unmount/page switch
   useEffect(() => () => clearTimeout(saveTimer.current), [pageId]);
@@ -283,6 +295,8 @@ export default function PageEditor() {
           onReady={(editor) => { editorRef.current = editor; }}
         />
       </Container>
+
+      <FindBar editor={editorRef.current} opened={findOpen} onClose={() => setFindOpen(false)} />
 
       <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <HistoryModal

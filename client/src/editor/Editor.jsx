@@ -38,6 +38,7 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { FindInPage } from './FindInPage.js';
 
 const lowlight = createLowlight(common);
 
@@ -83,6 +84,7 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
     }),
     SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    FindInPage,
   ];
 }
 
