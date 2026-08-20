@@ -1,23 +1,32 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Container, Title, Paper, Stack, Text, Switch, Group, Alert, Badge, Slider, Anchor,
+  TextInput, Button,
 } from '@mantine/core';
 import { IconInfoCircle, IconPointer, IconUpload, IconGauge } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { WORKSPACE_NAME_MAX } from '../lib/workspace.js';
 
 /**
  * Workspace-wide settings. Unlike /settings (which is per-account), everything
  * here applies to every member at once, so only owners and admins can change it.
  */
 export default function WorkspaceSettings() {
-  const { workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance, isAdmin } =
-    useAuth();
+  const {
+    workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance,
+    updateWorkspaceName, isAdmin,
+  } = useAuth();
   const [saving, setSaving] = useState(null);
   // The slider is dragged locally and only written on release; every drag step
   // would otherwise be a PATCH and an SSE fan-out to every browser.
   const [rate, setRate] = useState(performanceSettings.sampleRate);
+  // Draft name, written on Save. It follows the workspace name whenever that
+  // changes underneath us — another admin renaming it, or /api/auth/me landing
+  // after this screen has already mounted.
+  const [name, setName] = useState(workspaceName);
+  useEffect(() => setName(workspaceName), [workspaceName]);
 
   const save = async (key, run) => {
     setSaving(key);
@@ -33,6 +42,12 @@ export default function WorkspaceSettings() {
 
   const toggle = (key, enabled) => save(key, () => updateDataSavings({ [key]: enabled }));
 
+  const saveName = () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === workspaceName) return;
+    save('name', () => updateWorkspaceName(trimmed));
+  };
+
   return (
     <Container size="sm" py="xl" className="gd-fade-in">
       <Title order={2}>Workspace settings</Title>
@@ -45,6 +60,34 @@ export default function WorkspaceSettings() {
           Only workspace owners and admins can change these settings.
         </Alert>
       )}
+
+      <Paper withBorder p="md" mb="md">
+        <Stack>
+          <div>
+            <Text fw={700} size="sm">Name</Text>
+            <Text size="xs" c="dimmed">
+              What this workspace is called in the sidebar, on the login screen and on shared pages.
+            </Text>
+          </div>
+          <TextInput
+            label="Workspace name"
+            value={name}
+            maxLength={WORKSPACE_NAME_MAX}
+            disabled={!isAdmin || saving === 'name'}
+            onChange={(e) => setName(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveName()}
+          />
+          <Group justify="flex-end">
+            <Button
+              onClick={saveName}
+              loading={saving === 'name'}
+              disabled={!isAdmin || !name.trim() || name.trim() === workspaceName}
+            >
+              Save name
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
 
       <Paper withBorder p="md">
         <Stack>
