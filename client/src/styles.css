@@ -302,6 +302,40 @@
 .gd-drawio-preview { display: flex; justify-content: center; }
 .gd-drawio-preview img { max-width: 100%; }
 
+/* diagram node hover actions (zoom / edit) */
+.gd-node-actions {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; align-items: center; gap: 4px;
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.gd-mermaid:hover .gd-node-actions,
+.gd-excalidraw:hover .gd-node-actions,
+.gd-drawio:hover .gd-node-actions,
+.gd-node-actions:focus-within { opacity: 1; }
+
+/* full-screen diagram viewer (zoom + pan) */
+.gd-lightbox {
+  display: flex; flex-direction: column; height: 100vh;
+  background: var(--mantine-color-body);
+}
+.gd-lightbox-bar {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.gd-lightbox-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-lightbox-viewport {
+  position: relative; flex: 1; overflow: hidden;
+  cursor: grab; touch-action: none;
+  background: var(--mantine-color-default);
+}
+.gd-lightbox-viewport:active { cursor: grabbing; }
+.gd-lightbox-content {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0; display: inline-block; user-select: none;
+}
+.gd-lightbox-content svg,
+.gd-lightbox-content img { display: block; max-width: none; height: auto; }
+
 /* ---------- document bar (PDF / PPTX attachment) ---------- */
 .gd-document {
   display: flex;
@@ -336,7 +370,7 @@
 /* ---------- print ---------- */
 @media print {
   .mantine-AppShell-navbar, .gd-page-topbar, .gd-burger, .gd-savestate,
-  .gd-node-edit-btn, .gd-tree-actions { display: none !important; }
+  .gd-node-edit-btn, .gd-node-actions, .gd-tree-actions { display: none !important; }
   .mantine-AppShell-main { padding-left: 0 !important; }
   .gd-editor { min-height: 0; }
 }
