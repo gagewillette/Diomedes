@@ -48,6 +48,7 @@ import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
 import { FootnoteExtensions } from './nodes/Footnote.jsx';
+import { FOOTNOTE, FOOTNOTES } from './footnotes.js';
 import { VimMode } from './vim/VimMode.js';
 import VimStatus from './vim/VimStatus.jsx';
 import Collaboration from '@tiptap/extension-collaboration';
@@ -69,6 +70,12 @@ const FootnoteDocument = Document.extend({ content: 'block+ footnotes?' });
 
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
+
+// Placeholder walks top-level nodes only, so with the caret down in a footnote
+// the node it decorates is the whole apparatus — which counts as empty while
+// the note has no text yet. The hint is drawn at that container's top-left
+// corner, which is the FOOTNOTES heading, not the line being typed on.
+const NO_PLACEHOLDER = new Set([FOOTNOTES, FOOTNOTE]);
 
 export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false }) {
   return [
@@ -99,7 +106,13 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     Youtube.configure({ nocookie: true, width: 640, height: 360 }),
     Mathematics,
     Placeholder.configure({
-      placeholder: ({ node }) => (node.type.name === 'heading' ? 'Heading' : placeholder),
+      placeholder: ({ node }) => {
+        if (node.type.name === 'heading') return 'Heading';
+        // The footnote apparatus is chrome, not a line you type on: the number
+        // beside the caret already says what to do there.
+        if (NO_PLACEHOLDER.has(node.type.name)) return '';
+        return placeholder;
+      },
     }),
     Markdown.configure({
       html: false,

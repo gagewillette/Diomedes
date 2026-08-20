@@ -154,13 +154,25 @@
 .gd-editor img.ProseMirror-selectednode { outline: 2px solid var(--mantine-color-blue-5); }
 
 /* placeholder */
+.gd-editor p.is-editor-empty:first-child,
+.gd-editor .is-empty { position: relative; }
+/* Absolute rather than the usual `float: left; height: 0`: a zero-height float
+   paints outside its own line box, so in a tight column — a footnote body sat
+   under the divider — the hint landed on top of the FOOTNOTES heading. Taken
+   out of flow against its own paragraph it can only ever sit on its own line,
+   and the clamp keeps a long hint inside the column it belongs to. */
 .gd-editor p.is-editor-empty:first-child::before,
 .gd-editor .is-empty::before {
   content: attr(data-placeholder);
-  float: left;
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--mantine-color-placeholder);
   pointer-events: none;
-  height: 0;
 }
 
 /* tables */
@@ -943,8 +955,13 @@
 }
 .gd-footnote-backref:hover { background: var(--mantine-color-blue-light); }
 .gd-footnote-body { flex: 1; min-width: 0; }
-.gd-footnote-body > :first-child { margin-top: 0; }
-.gd-footnote-body > :last-child { margin-bottom: 0; }
+/* Descendant, not child: NodeViewContent puts its own wrappers between this
+   element and the paragraph, so `> :first-child` only ever reached an empty
+   div. The paragraph kept its 1em margins, and a flex item is its own block
+   formatting context — nothing collapses out — so the note's text sat a full
+   line below the number beside it. */
+.gd-footnote-body :first-child { margin-top: 0; }
+.gd-footnote-body :last-child { margin-bottom: 0; }
 .gd-footnote:focus { outline: none; }
 
 /* ---------- footnote hover preview ---------- */
