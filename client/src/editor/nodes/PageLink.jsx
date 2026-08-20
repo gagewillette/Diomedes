@@ -7,6 +7,7 @@ import { IconFileText, IconPlus, IconLinkOff } from '@tabler/icons-react';
 import { api, emitNavigate, emitPagesChanged } from '../../lib/api.js';
 import { makeSuggestionRender } from '../suggestionRender.js';
 import { subscribeTitle, getCachedTitle } from './pageTitles.js';
+import { subscribeLabel, getCachedLabel } from './pageLabels.js';
 import PagePicker from '../../components/PagePicker.jsx';
 
 // Where the editor currently is. Set by Editor.jsx before rendering, so the
@@ -46,6 +47,27 @@ function findWikiLinkMatch({ $position }) {
   };
 }
 
+// Read-time resolution for a label-only link: `undefined` while the lookup is
+// in flight, `null` when nothing in the space is titled that, the page when
+// something is. Passing `null` for the label opts out entirely, which is what a
+// link that already carries an id does.
+function useLabelResolution(label) {
+  const spaceId = linkContext.spaceId;
+  const [found, setFound] = useState(() =>
+    label ? getCachedLabel(spaceId, label) : null
+  );
+
+  useEffect(() => {
+    if (!label) {
+      setFound(null);
+      return undefined;
+    }
+    return subscribeLabel(spaceId, label, setFound);
+  }, [spaceId, label]);
+
+  return label ? found : null;
+}
+
 function PageLinkView({ node, updateAttributes, editor }) {
   const { pageId, label, spaceSlug } = node.attrs;
   const [picking, setPicking] = useState(false);
@@ -71,9 +93,17 @@ function PageLinkView({ node, updateAttributes, editor }) {
     updateAttributes({ spaceSlug: live.spaceSlug });
   }, [pageId, live?.spaceSlug, spaceSlug, editor, updateAttributes]);
 
-  const resolved = Boolean(pageId) && live !== null;
-  const text = (live?.title ?? label) || 'Untitled';
-  const href = resolved ? pageHref(live?.spaceSlug || spaceSlug, pageId) : null;
+  // A link with no id was written against a title that had no page yet — often
+  // just moments earlier, by an import that wrote this page before its target.
+  // Resolving the label here means the chip heals as soon as the target exists,
+  // with no rewrite of the document and no dependence on who was written first.
+  const byLabel = useLabelResolution(pageId ? null : label);
+
+  const resolvedId = pageId || byLabel?.id || null;
+  const target = pageId ? live : byLabel;
+  const resolved = Boolean(resolvedId) && target !== null;
+  const text = (target?.title ?? label) || 'Untitled';
+  const href = resolved ? pageHref(target?.spaceSlug || spaceSlug, resolvedId) : null;
 
   // A link written by the MCP server or an import names a title that may never
   // have had a page — or may have one under a slightly different title. The chip
