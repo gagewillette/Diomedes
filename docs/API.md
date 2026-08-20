@@ -77,12 +77,22 @@ Page `content` is TipTap/ProseMirror JSON (`{"type":"doc","content":[...]}`).
 Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagram{code}`,
 `excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`.
 
+A `drawioDiagram` needs only its `xml` (an mxGraph `<mxfile>`/`<mxGraphModel>`
+document) — the `svg` preview is optional. An API client that writes a diagram
+usually has no way to produce a picture, so the client renders one on first view
+and writes it back to the node. Send `{"xml": "…", "svg": ""}` and the page draws
+the same diagram it would have drawn had someone made it in the editor.
+
 Mermaid diagrams are normalised on write: a `codeBlock` whose language is
 mermaid (case-insensitive, `mmd` included, info-string attributes ignored) is
 stored as a `mermaidDiagram{code}` node, as is an unlabelled code block whose
 body opens with a mermaid declaration (`graph TD`, `sequenceDiagram`, …). A
 client that sends markdown-derived JSON therefore gets a rendered, editable
-diagram rather than raw source in a code block.
+diagram rather than raw source in a code block. Draw.io code blocks are
+normalised the same way: a ```` ```drawio ```` fence (also `draw.io`, `mxgraph`),
+or an unlabelled fence whose body opens with `<mxfile>`/`<mxGraphModel>`, is
+stored as a `drawioDiagram{xml}`. A fence that names some other language is left
+alone in both cases — a code block someone chose is a code block.
 
 Every block-level node carries a `blockId` attribute. Clients that write documents
 are not required to supply one — the server mints ids for any block arriving

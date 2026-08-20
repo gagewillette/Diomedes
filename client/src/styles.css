@@ -472,6 +472,20 @@
 .gd-drawio:hover .gd-node-edit-btn { opacity: 1; }
 .gd-drawio-preview { display: flex; justify-content: center; }
 .gd-drawio-preview img { max-width: 100%; }
+.gd-drawio-loading {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px dashed var(--mantine-color-default-border);
+  border-radius: 8px; padding: 24px;
+}
+.gd-drawio-error {
+  border: 1px solid var(--mantine-color-red-5);
+  border-radius: 8px; padding: 12px;
+}
+.gd-drawio-error pre {
+  margin: 8px 0 0; max-height: 160px; overflow: auto;
+  font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  color: var(--mantine-color-dimmed);
+}
 
 /* diagram node hover actions (zoom / edit) */
 .gd-node-actions {

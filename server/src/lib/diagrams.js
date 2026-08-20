@@ -1,7 +1,9 @@
-// Mermaid diagrams arrive as code blocks, and have to be stored as diagrams.
+// Diagrams arrive as code blocks, and have to be stored as diagrams.
 //
-// The editor stores a diagram as a `mermaidDiagram` node whose source lives in
-// `attrs.code`. Nothing that writes a page from outside the editor knows that:
+// The editor stores a mermaid diagram as a `mermaidDiagram` node whose source
+// lives in `attrs.code`, and a draw.io diagram as a `drawioDiagram` whose
+// mxGraph XML lives in `attrs.xml`.
+// Nothing that writes a page from outside the editor knows that:
 // the MCP server, the markdown importer and any REST client all speak markdown,
 // where a diagram is a fenced block. Whether that fence survives as a diagram or
 // lands as an inert ```mermaid code block then depends on how exactly the client
@@ -9,9 +11,9 @@
 // mermaid source that cannot be rendered, enlarged or edited.
 //
 // So the write path normalises instead of trusting: any code block that is a
-// mermaid diagram becomes a diagram node before it is stored. Clients keep
-// sending whatever they send, and older MCP builds are fixed without having to
-// ship them anything.
+// diagram becomes a diagram node before it is stored. Clients keep sending
+// whatever they send, and older MCP builds are fixed without having to ship
+// them anything.
 
 // Info strings carry more than a language — ```mermaid title="flow" is valid.
 // Only the first token names the language.
@@ -80,12 +82,32 @@ export function looksLikeMermaid(code) {
   return DIRECTED_RE.test(declaration) || KEYWORD_RE.test(declaration);
 }
 
+// draw.io diagrams are mxGraph XML. The fence may name them, or carry no
+// useful label at all — in which case the document element gives it away, and
+// unambiguously enough that no `graph TD`-style direction check is needed.
+const DRAWIO_ALIASES = new Set(['drawio', 'draw.io', 'mxgraph', 'mxfile']);
+const DRAWIO_OPEN = /^\s*(?:<\?xml[^>]*\?>\s*)?<(?:mxfile|mxGraphModel)[\s>]/i;
+
+/** True for ```drawio, ```draw.io, ```mxgraph … */
+export function isDrawioLanguage(language) {
+  if (!language) return false;
+  const first = String(language).trim().split(/[\s,{:]/)[0];
+  return DRAWIO_ALIASES.has(first.toLowerCase());
+}
+
+/** True when the body of a fence is plainly an mxGraph document. */
+export function looksLikeDrawio(code) {
+  return DRAWIO_OPEN.test(String(code ?? ''));
+}
+
 const textOf = (node) =>
   (node.content || [])
     .map((child) => (typeof child.text === 'string' ? child.text : ''))
     .join('');
 
 const toDiagram = (code) => ({ type: 'mermaidDiagram', attrs: { code } });
+// The preview is rendered by the client on first view; only the XML is stored.
+const toDrawio = (xml) => ({ type: 'drawioDiagram', attrs: { xml: xml.trim(), svg: '' } });
 
 function normalizeNode(node) {
   if (!node || typeof node !== 'object') return node;
@@ -94,7 +116,9 @@ function normalizeNode(node) {
     const code = textOf(node);
     const language = node.attrs?.language;
     if (isMermaidLanguage(language)) return toDiagram(code);
+    if (isDrawioLanguage(language)) return toDrawio(code);
     if (!language && looksLikeMermaid(code)) return toDiagram(code);
+    if (!language && looksLikeDrawio(code)) return toDrawio(code);
     return node;
   }
 
@@ -102,6 +126,9 @@ function normalizeNode(node) {
   // renders empty. Lift it rather than lose it.
   if (node.type === 'mermaidDiagram' && !node.attrs?.code && node.content?.length) {
     return toDiagram(textOf(node));
+  }
+  if (node.type === 'drawioDiagram' && !node.attrs?.xml && node.content?.length) {
+    return toDrawio(textOf(node));
   }
 
   if (!Array.isArray(node.content)) return node;
@@ -115,7 +142,7 @@ function normalizeNode(node) {
 }
 
 /**
- * Rewrite every mermaid code block in a document into a diagram node.
+ * Rewrite every diagram code block in a document into a diagram node.
  *
  * Returns the same object when nothing matched, so a save with no diagrams in
  * it costs one walk and no allocation.

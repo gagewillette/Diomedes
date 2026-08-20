@@ -35,7 +35,9 @@ user management. Per-user editor preferences (font, size, spacing, width, animat
 **API**: every endpoint accepts a session cookie *or* a personal API token
 (`Authorization: Bearer dio_…`, created in Settings) — built to hang an MCP server
 off of. See [docs/API.md](docs/API.md). Full feature mapping against Docmost lives
-in [FEATURES.md](FEATURES.md).
+in [FEATURES.md](FEATURES.md). Diagrams travel over that API as text: a
+```` ```mermaid ```` fence for Mermaid, a ```` ```drawio ```` fence of mxGraph XML
+for Draw.io. Both are drawn in the page exactly as if they had been made here.
 
 ## Layout
 

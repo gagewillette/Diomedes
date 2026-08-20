@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDiagrams, isMermaidLanguage, looksLikeMermaid } from '../src/lib/mermaid.js';
+import {
+  normalizeDiagrams,
+  isMermaidLanguage,
+  looksLikeMermaid,
+  isDrawioLanguage,
+  looksLikeDrawio,
+} from '../src/lib/diagrams.js';
 
 const codeBlock = (language, code) => ({
   type: 'codeBlock',
@@ -99,4 +105,53 @@ test('the language and body predicates stand on their own', () => {
   assert.equal(looksLikeMermaid('graph TD\n A-->B'), true);
   assert.equal(looksLikeMermaid('graph\n A-->B'), false);
   assert.equal(looksLikeMermaid('  \n\nsequenceDiagram\n A->>B: x'), true);
+});
+
+const MXFILE =
+  '<mxfile host="app.diagrams.net"><diagram name="Page-1"><mxGraphModel dx="800">' +
+  '<root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>';
+
+test('a ```drawio fence becomes a draw.io diagram node', () => {
+  const out = normalizeDiagrams(doc(codeBlock('drawio', MXFILE)));
+  assert.deepEqual(out.content[0], { type: 'drawioDiagram', attrs: { xml: MXFILE, svg: '' } });
+});
+
+test('draw.io language aliases and info strings are matched like mermaid ones', () => {
+  for (const lang of ['draw.io', 'MxGraph', 'drawio title="net"']) {
+    assert.equal(normalizeDiagrams(doc(codeBlock(lang, MXFILE))).content[0].type, 'drawioDiagram', lang);
+  }
+});
+
+test('an unlabelled fence holding mxGraph XML becomes a diagram', () => {
+  const out = normalizeDiagrams(doc(codeBlock(null, MXFILE)));
+  assert.equal(out.content[0].type, 'drawioDiagram');
+});
+
+test('a fence that names another language keeps its diagram XML as code', () => {
+  // Someone documenting mxGraph in a ```xml block chose a code block; the MCP
+  // server resolves that ambiguity before the document ever gets here.
+  const out = normalizeDiagrams(doc(codeBlock('xml', MXFILE)));
+  assert.equal(out.content[0].type, 'codeBlock');
+});
+
+test('a draw.io node carrying its XML as text has it lifted into attrs.xml', () => {
+  const out = normalizeDiagrams(
+    doc({ type: 'drawioDiagram', attrs: {}, content: [{ type: 'text', text: MXFILE }] })
+  );
+  assert.deepEqual(out.content[0], { type: 'drawioDiagram', attrs: { xml: MXFILE, svg: '' } });
+});
+
+test('a draw.io diagram that already has its xml is left alone', () => {
+  const input = doc({ type: 'drawioDiagram', attrs: { xml: MXFILE, svg: 'data:image/svg+xml;base64,x' } });
+  assert.equal(normalizeDiagrams(input), input);
+});
+
+test('the draw.io predicates stand on their own', () => {
+  assert.equal(isDrawioLanguage('drawio'), true);
+  assert.equal(isDrawioLanguage('drawiothing'), false);
+  assert.equal(isDrawioLanguage(null), false);
+  assert.equal(looksLikeDrawio('\n  <?xml version="1.0"?>\n<mxfile>'), true);
+  assert.equal(looksLikeDrawio('<mxGraphModel dx="1">'), true);
+  assert.equal(looksLikeDrawio('<mxfilething>'), false);
+  assert.equal(looksLikeDrawio(''), false);
 });

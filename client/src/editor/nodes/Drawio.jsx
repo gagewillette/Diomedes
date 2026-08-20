@@ -1,14 +1,15 @@
 import { Node } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
-import { ActionIcon, Button, Modal, Text, Tooltip, useComputedColorScheme } from '@mantine/core';
+import { ActionIcon, Button, Loader, Modal, Text, Tooltip, useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
-
-const DRAWIO_ORIGIN = 'https://embed.diagrams.net';
+import { DRAWIO_ORIGIN, renderDrawioXml } from '../drawioRender.js';
 
 function DrawioView({ node, updateAttributes, editor, selected }) {
   const [open, setOpen] = useState(false);
+  const [rendered, setRendered] = useState('');
+  const [renderError, setRenderError] = useState(null);
   const iframeRef = useRef(null);
   const xmlRef = useRef(node.attrs.xml);
   const colorScheme = useComputedColorScheme('light');
@@ -20,6 +21,37 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A diagram pushed in over the API — the MCP server, say — carries only its
+  // mxGraph XML; markdown has no room for a picture. Draw the preview here the
+  // way the editor would have, and cache it back onto the node so later readers
+  // (including anyone without write access) get it for free.
+  const { xml, svg } = node.attrs;
+  useEffect(() => {
+    if (!xml || svg) {
+      setRendered('');
+      setRenderError(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setRenderError(null);
+    renderDrawioXml(xml).then(
+      (data) => {
+        if (cancelled) return;
+        setRendered(data);
+        if (editor.isEditable) updateAttributes({ svg: data });
+      },
+      (err) => {
+        if (!cancelled) setRenderError(String(err?.message || err));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xml, svg, editor.isEditable]);
+
+  const preview = svg || rendered;
 
   const close = () => {
     setOpen(false);
@@ -38,7 +70,7 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
       }
       const post = (data) => iframeRef.current?.contentWindow?.postMessage(JSON.stringify(data), DRAWIO_ORIGIN);
       if (msg.event === 'init') {
-        post({ action: 'load', xml: node.attrs.xml || '', autosave: 0 });
+        post({ action: 'load', xml: xml || '', autosave: 0 });
       } else if (msg.event === 'save') {
         xmlRef.current = msg.xml;
         post({ action: 'export', format: 'xmlsvg' }); // svg with the xml embedded, used as preview
@@ -51,10 +83,10 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [open, node.attrs.xml, updateAttributes]);
+  }, [open, xml, updateAttributes]);
 
   const openZoom = () =>
-    openDiagramLightbox({ key: `drawio-${node.attrs.svg?.slice(0, 64)}`, title: 'draw.io diagram', src: node.attrs.svg });
+    openDiagramLightbox({ key: `drawio-${preview?.slice(0, 64)}`, title: 'draw.io diagram', src: preview });
 
   const zoomHandlers = useZoomClickHandlers({
     editable: editor.isEditable,
@@ -66,9 +98,23 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
 
   return (
     <NodeViewWrapper className={`gd-drawio ${selected ? 'is-selected' : ''}`} contentEditable={false}>
-      {node.attrs.svg ? (
+      {preview ? (
         <div className="gd-drawio-preview" {...zoomHandlers}>
-          <img src={node.attrs.svg} alt="draw.io diagram" />
+          <img src={preview} alt="draw.io diagram" />
+        </div>
+      ) : renderError ? (
+        <div className="gd-drawio-error" onDoubleClick={() => editor.isEditable && setOpen(true)}>
+          <Text c="red" size="sm">
+            Could not render this draw.io diagram: {renderError}
+          </Text>
+          <pre>{xml}</pre>
+        </div>
+      ) : xml ? (
+        <div className="gd-drawio-loading">
+          <Loader size="sm" />
+          <Text c="dimmed" size="sm">
+            Rendering draw.io diagram…
+          </Text>
         </div>
       ) : (
         <div className="gd-excalidraw-empty" onDoubleClick={() => editor.isEditable && setOpen(true)}>
@@ -78,7 +124,7 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
         </div>
       )}
       <div className="gd-node-actions">
-        {node.attrs.svg && (
+        {preview && (
           <Tooltip label="Open full screen">
             <ActionIcon
               size="sm"

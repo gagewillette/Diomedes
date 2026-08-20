@@ -21,7 +21,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Math (inline + block, KaTeX) | ✅ KaTeX rendering of `$…$` |
 | Mermaid diagrams | ✅ Live-rendered Mermaid node with code editor |
 | Excalidraw diagrams | ✅ Full Excalidraw editor in a modal, scene stored in the doc |
-| Draw.io diagrams | ✅ Full diagrams.net editor in a modal (embed.diagrams.net postMessage integration); XML + SVG preview stored in the doc |
+| Draw.io diagrams | ✅ Full diagrams.net editor in a modal (embed.diagrams.net postMessage integration); XML + SVG preview stored in the doc. XML pushed in over the API/MCP (```drawio fence) is rendered on first view |
 | Images / video / file attachments | ✅ Upload to server-local storage, drag-drop and paste images |
 | PDF / PowerPoint documents | ✅ `/document` or drag-drop inserts a document bar. PDFs open in the browser's native viewer in a new tab; a PPTX is stored as-is (download only) or converted to PDF server-side on upload. Stored under a per-user directory |
 | Embeds (YouTube, iframe → Airtable/Loom/Miro/Figma/etc.) | ✅ YouTube node + generic iframe embed node (paste any embed URL) |

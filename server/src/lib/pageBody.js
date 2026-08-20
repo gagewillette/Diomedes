@@ -15,7 +15,7 @@
 import { pool } from '../db.js';
 import { extractText } from './util.js';
 import { materializeBlocks, splitBlocks } from './blocks.js';
-import { normalizeDiagrams } from './mermaid.js';
+import { normalizeDiagrams } from './diagrams.js';
 
 // Same expression the routes used inline, kept identical so the migration
 // changes no search behaviour.
