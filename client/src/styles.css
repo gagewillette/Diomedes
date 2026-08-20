@@ -151,11 +151,27 @@ body.gd-block-drag-active {
 /* Link color is for prose links only — buttons rendered as anchors (the
    document card download button) keep their own Mantine color. */
 .gd-editor a:not(.mantine-ActionIcon-root) { color: var(--mantine-color-blue-6); }
+/* Every link is clickable in both modes: an in-page `#slug` anchor jumps to its
+   heading (SectionRef), everything else opens in a new tab (linkClick). The
+   pointer is the only thing that says so before you try, and Alt-click is how
+   an author reaches the caret to edit the link's own words. */
+.gd-editor a[href]:not(.mantine-ActionIcon-root) { cursor: pointer; }
+.gd-editor a[href]:not(.mantine-ActionIcon-root):hover {
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
 
-/* An in-page `[text](#slug)` link jumps to the heading it names, so it wants a
-   link's cursor rather than the caret contenteditable gives every other run of
-   text. Alt-click still places the caret, for editing the link's own words. */
-.gd-editor a[href^='#'] { cursor: pointer; }
+/* The markdown a heading link unfolds into while the caret is inside it. It has
+   to read as syntax rather than as words — dimmed, monospaced, and unselectable
+   so a drag across the sentence picks up the label and not the brackets. */
+.gd-link-syntax {
+  color: var(--mantine-color-dimmed);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  opacity: 0.75;
+  user-select: none;
+  cursor: default;
+}
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
