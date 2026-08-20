@@ -10,6 +10,7 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
 import { BlockId } from '../editor/blockId.js';
+import { hydrateDiagramBlocks } from './diagramBlocks.js';
 
 // Parse a markdown string into TipTap JSON using a throwaway headless editor.
 export function markdownToJSON(md) {
@@ -31,7 +32,9 @@ export function markdownToJSON(md) {
   });
   const json = editor.getJSON();
   editor.destroy();
-  return json;
+  // ```mermaid / ```drawio fences are diagrams, not code — the headless editor
+  // above has no diagram extensions, so promote them on the way out.
+  return hydrateDiagramBlocks(json);
 }
 
 export function downloadFile(filename, content, mime = 'text/plain') {

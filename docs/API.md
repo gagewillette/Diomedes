@@ -76,6 +76,12 @@ Page `content` is TipTap/ProseMirror JSON (`{"type":"doc","content":[...]}`).
 Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagram{code}`,
 `excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`.
 
+A `drawioDiagram` needs only its `xml` (an mxGraph `<mxfile>`/`<mxGraphModel>`
+document) — the `svg` preview is optional. An API client that writes a diagram
+usually has no way to produce a picture, so the client renders one on first view
+and writes it back to the node. Send `{"xml": "…", "svg": ""}` and the page draws
+the same diagram it would have drawn had someone made it in the editor.
+
 Every block-level node carries a `blockId` attribute. Clients that write documents
 are not required to supply one — the server mints ids for any block arriving
 without them and stores them back into the document — but a client that *does*
