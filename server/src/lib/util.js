@@ -10,6 +10,11 @@ export function extractText(node) {
     if (typeof node.attrs.code === 'string') parts.push(node.attrs.code);
     if (typeof node.attrs.title === 'string') parts.push(node.attrs.title);
   }
+  // Footnote bodies are indexed like any other text — a citation nobody can
+  // search for is a citation nobody will find. The label rides along so a
+  // ts_headline fragment drawn from a note does not read as body prose in the
+  // search results.
+  if (node.type === 'footnotes') parts.push('Footnotes:');
   if (Array.isArray(node.content)) {
     for (const child of node.content) parts.push(extractText(child));
   }
