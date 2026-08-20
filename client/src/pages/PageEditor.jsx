@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Container, Group, Text, ActionIcon, Menu, Tooltip, Breadcrumbs, Anchor, TextInput,
-  Popover, Button, Switch, Stack, Loader, Center, CopyButton,
+  Popover, Button, Switch, Stack, Loader, Center, CopyButton, UnstyledButton,
 } from '@mantine/core';
 import {
   IconStar, IconStarFilled, IconDots, IconHistory, IconMessageCircle, IconShare,
@@ -26,6 +26,7 @@ import { usePeers } from '../editor/collab/presence.js';
 import { pickUserColor } from '../lib/userColor.js';
 import BacklinksPanel from '../components/BacklinksPanel.jsx';
 import PagePicker from '../components/PagePicker.jsx';
+import { elideCrumbs } from '../components/pageDepth.js';
 import Emoji from '../components/Emoji.jsx';
 import IconPickerModal from '../components/IconPickerModal.jsx';
 import { onFocusEditor, onRequestSave } from '../lib/vimFocus.js';
@@ -43,6 +44,8 @@ export default function PageEditor() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  // Ids the parent picker must not offer; filled in when the picker opens.
+  const [parentBlocked, setParentBlocked] = useState([]);
   const [iconOpen, setIconOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
@@ -214,6 +217,28 @@ export default function PageEditor() {
   // flush pending save on unmount/page switch
   useEffect(() => () => clearTimeout(saveTimer.current), [pageId]);
 
+  // Ids the parent picker must not offer: this page and everything under it.
+  // Fetched when the picker opens rather than held all the time — one request,
+  // and only when someone actually reparents. Above the `if (!data)` return
+  // below, because every hook in this component has to run on every render.
+  useEffect(() => {
+    if (!parentPickerOpen) return undefined;
+    let cancelled = false;
+    setParentBlocked([pageId]);
+    api
+      .get(`/api/pages/${pageId}/subtree`)
+      .then((res) => {
+        if (!cancelled) setParentBlocked(res.pages.map((p) => p.id));
+      })
+      // The page itself is already excluded; failing to learn its descendants
+      // leaves the picker slightly too permissive, which the server still
+      // catches. Not worth an error banner over.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [parentPickerOpen, pageId]);
+
   // The tab wears the open document's name and icon, and follows the title
   // field as it is typed rather than waiting for the debounced save.
   useDocumentIdentity(data ? title : undefined, data?.page.icon);
@@ -293,6 +318,51 @@ export default function PageEditor() {
 
   const shareUrl = shareToken ? `${location.origin}/share/${shareToken}` : null;
 
+  // Breadcrumbs, elided in the middle once the chain gets long.
+  //
+  // Pages nest to any depth now, and the header is one row: a six-deep page
+  // rendered in full pushes the presence bar, save state and page menu off the
+  // end of the bar, and the segments that get squeezed are the first and last —
+  // the two that actually say where you are. So keep the first ancestor and the
+  // last two, and put everything between them behind a menu, which is where a
+  // reader would look for "the levels I skipped" anyway.
+  const { leading, elided, trailing } = elideCrumbs(data.breadcrumbs);
+
+  const crumbLink = (b) => (
+    <Anchor key={b.id} component={Link} to={`/s/${slug}/p/${b.id}`} size="sm" c="dimmed">
+      <Emoji char={b.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+      {b.title || 'Untitled'}
+    </Anchor>
+  );
+
+  // Mantine's Breadcrumbs puts a separator between each child, so the elided
+  // levels have to be one child in that list rather than a nested fragment —
+  // otherwise the "…" arrives without its separators and reads as part of the
+  // segment beside it.
+  const crumbNodes = [
+    ...leading.map(crumbLink),
+    ...(elided.length
+      ? [
+          <Menu key="elided" withinPortal position="bottom-start" shadow="md">
+            <Menu.Target>
+              <UnstyledButton className="gd-crumb-more" aria-label={`${elided.length} more levels`}>
+                <Text size="sm" c="dimmed">…</Text>
+              </UnstyledButton>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {elided.map((b) => (
+                <Menu.Item key={b.id} onClick={() => navigate(`/s/${slug}/p/${b.id}`)}>
+                  <Emoji char={b.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                  {b.title || 'Untitled'}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>,
+        ]
+      : []),
+    ...trailing.map(crumbLink),
+  ];
+
   return (
     <div className="gd-page">
       <Group justify="space-between" py={8} className="gd-page-topbar" wrap="nowrap">
@@ -301,12 +371,7 @@ export default function PageEditor() {
             <Emoji char={data.space.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
             {data.space.name}
           </Anchor>
-          {data.breadcrumbs.map((b) => (
-            <Anchor key={b.id} component={Link} to={`/s/${slug}/p/${b.id}`} size="sm" c="dimmed">
-              <Emoji char={b.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-              {b.title || 'Untitled'}
-            </Anchor>
-          ))}
+          {crumbNodes}
           <Text size="sm">{title || 'Untitled'}</Text>
         </Breadcrumbs>
         <Group gap={4} wrap="nowrap">
@@ -462,10 +527,9 @@ export default function PageEditor() {
         onPick={setParent}
         title="Set parent page"
         spaceId={data.page.space_id}
-        exclude={pageId}
+        exclude={parentBlocked}
         rootLabel="No parent (top level)"
         onlySpace
-        topLevelOnly
       />
       <IconPickerModal
         page={iconOpen ? { ...data.page, title } : null}

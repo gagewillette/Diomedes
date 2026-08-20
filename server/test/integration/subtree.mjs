@@ -4,10 +4,12 @@
 // really does need one: the whole point of the query is a recursive CTE, and a
 // recursion that stops one level short cannot be caught by anything less.
 //
-// The trees here are built by writing parent_id directly, on purpose. The UI
-// only allows one level of nesting today, so a fixture that went through the
-// API could never reach a grandchild — and a grandchild is exactly the case
-// that will break the day the nesting limit lifts.
+// The trees here are built by writing parent_id directly, on purpose. That
+// predates issue #24 — the fixture had to bypass a one-level cap the API would
+// otherwise have enforced — and it is still the right call: this file is about
+// the recursion in pageSubtree, and going through movePage would mix its depth
+// checks into a test that is not about them. test/integration/depth.mjs covers
+// the same trees built the way a user builds them.
 import { q, pool, migrate } from '../../src/db.js';
 import { pageSubtree } from '../../src/lib/subtree.js';
 import { generateKeyBetween } from '../../src/lib/orderKey.js';

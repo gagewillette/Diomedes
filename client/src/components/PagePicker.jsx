@@ -7,6 +7,11 @@ import Emoji from './Emoji.jsx';
 // Search-and-pick dialog over every page the user can read. Used to choose a
 // page's parent, so nesting is an explicit choice rather than something you
 // nudge into place with "move up" / "indent" one step at a time.
+//
+// `exclude` is a page id or a list of them. As a parent picker it should be the
+// whole subtree of the page being moved: pages nest to any depth now, so a
+// descendant is a plausible-looking destination that the server can only refuse
+// after the user has picked it.
 export default function PagePicker({
   opened,
   onClose,
@@ -16,11 +21,11 @@ export default function PagePicker({
   exclude = null,
   rootLabel = null,
   onlySpace = false,
-  topLevelOnly = false,
 }) {
   const [query, setQuery] = useState('');
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const excludeKey = [].concat(exclude || []).join(',');
 
   useEffect(() => {
     if (!opened) return undefined;
@@ -31,8 +36,7 @@ export default function PagePicker({
         const params = new URLSearchParams({ q: query });
         if (spaceId) params.set('spaceId', spaceId);
         if (onlySpace) params.set('onlySpace', '1');
-        if (topLevelOnly) params.set('topLevelOnly', '1');
-        if (exclude) params.set('exclude', exclude);
+        for (const id of [].concat(exclude || [])) params.append('exclude', id);
         const data = await api.get(`/api/pages/link-search?${params}`);
         if (!cancelled) setPages(data.pages);
       } catch {
@@ -45,7 +49,10 @@ export default function PagePicker({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [opened, query, spaceId, exclude, onlySpace, topLevelOnly]);
+  // Joined rather than passed straight through: `exclude` is usually a freshly
+  // built array, and a raw array in the dependency list would refetch on every
+  // render of the parent.
+  }, [opened, query, spaceId, excludeKey, onlySpace]);
 
   // Start each visit from a clean search rather than the last one's leftovers.
   useEffect(() => {
