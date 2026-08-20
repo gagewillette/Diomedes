@@ -448,13 +448,16 @@ export default function PageTree({ space }) {
           </ActionIcon>
           <UnstyledButton
             className="gd-tree-label"
+            title={page.title || 'Untitled'}
             onClick={() => {
               setCursorId(page.id);
               navigate(`/s/${space.slug}/p/${page.id}`);
             }}
           >
             <Group gap={6} wrap="nowrap">
-              {page.icon ? <span>{page.icon}</span> : <IconFileText size={14} opacity={0.6} />}
+              <span className="gd-tree-icon">
+                {page.icon ? page.icon : <IconFileText size={14} opacity={0.6} />}
+              </span>
               <Text size="sm" truncate>{page.title || 'Untitled'}</Text>
             </Group>
           </UnstyledButton>
