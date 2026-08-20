@@ -73,3 +73,21 @@ test('isDrawioXml tolerates a leading xml declaration and whitespace', () => {
   assert.equal(isDrawioXml('<mxfilething>'), false);
   assert.equal(isDrawioXml(''), false);
 });
+
+// Mermaid is whitespace- and punctuation-sensitive: indentation carries
+// subgraph structure, `#59;` is how a message escapes a semicolon, and `<br/>`
+// is a line break inside a label. Promoting the fence must copy the source
+// through untouched — a diagram that renders in the fence and not in the
+// editor is this transform's fault.
+test('mermaid source survives the swap byte for byte', () => {
+  const code = [
+    'sequenceDiagram',
+    '  participant W as worker (brPop)',
+    '  W->>P: BEGIN#59; SELECT updated_at FOR UPDATE',
+    '  Note over W,P: roll back if the page changed',
+    '  W->>P: prefix each chunk with<br/>Title &gt; H1',
+  ].join('\n');
+  const doc = hydrateDiagramBlocks(codeBlock('mermaid', code));
+  assert.equal(doc.content[0].type, 'mermaidDiagram');
+  assert.equal(doc.content[0].attrs.code, code);
+});
