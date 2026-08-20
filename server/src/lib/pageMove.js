@@ -20,7 +20,7 @@
 import { pool } from '../db.js';
 import { httpError } from './util.js';
 import { PAGE_LINK_NODE } from './links.js';
-import { isOrderKey, keyForSlot } from './orderKey.js';
+import { generateNKeysBetween, isOrderKey, keyForSlot } from './orderKey.js';
 
 /**
  * Where to place a page dropped at `index` among `siblings`.
@@ -43,6 +43,28 @@ import { isOrderKey, keyForSlot } from './orderKey.js';
  */
 export function siblingOrderKey(siblings, index) {
   return keyForSlot(siblings, index);
+}
+
+/**
+ * Keys for `n` pages dropped into the same gap at once, in the order they
+ * should end up.
+ *
+ * A multi-page drop cannot just call `siblingOrderKey` n times: each call would
+ * measure the same gap and hand back the same key, and the pages would land on
+ * top of each other in an order the database picks. Splitting the gap n ways up
+ * front is what makes "the order they were in when you selected them" survive
+ * the drop.
+ *
+ * `siblings` must exclude *every* page in the batch, not just the one being
+ * written — otherwise a page already sitting in the destination list would be
+ * measured against its own soon-to-be-vacated slot.
+ */
+export function siblingOrderKeys(siblings, index, n) {
+  if (n <= 0) return [];
+  const at = Math.max(0, Math.min(index, siblings.length));
+  const before = at > 0 ? siblings[at - 1].order_key : null;
+  const after = at < siblings.length ? siblings[at].order_key : null;
+  return generateNKeysBetween(before, after, n);
 }
 
 /**

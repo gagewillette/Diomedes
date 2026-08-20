@@ -21,3 +21,44 @@ export function dropIntent(rect, clientY) {
   if (offset > rect.height * (1 - EDGE_FRACTION)) return 'after';
   return 'inside';
 }
+
+// How many pages of a selection are actually drawn in the thing the cursor
+// carries. Past three the fan stops reading as a stack and starts reading as a
+// smudge, and the count badge says the real number anyway.
+const STACK_MAX = 3;
+
+/**
+ * The ghost the cursor carries during a multi-page drag: a squared-up fan of
+ * cards with a count on it.
+ *
+ * It has to be a real, attached element — `setDragImage` snapshots it out of
+ * the live document, and a detached node or one with `display: none` snapshots
+ * as nothing. So it is parked off-screen instead, and the caller drops it once
+ * the browser has taken its picture.
+ *
+ * The snapshot is also why the fan is static: the shuffle the rows do as they
+ * are picked up is a CSS animation on the tree itself, which is where it can
+ * actually play.
+ */
+export function multiDragImage(titles, total, doc = document) {
+  const node = doc.createElement('div');
+  node.className = 'gd-drag-stack';
+  const shown = titles.slice(0, STACK_MAX);
+  // Back to front: the card the drag started from ends up last in the DOM, so
+  // it sits on top of the pile rather than under it.
+  for (let i = shown.length - 1; i >= 0; i--) {
+    const card = doc.createElement('div');
+    card.className = 'gd-drag-card';
+    card.style.setProperty('--i', String(i));
+    card.textContent = shown[i];
+    node.appendChild(card);
+  }
+  if (total > 1) {
+    const badge = doc.createElement('span');
+    badge.className = 'gd-drag-count';
+    badge.textContent = String(total);
+    node.appendChild(badge);
+  }
+  doc.body.appendChild(node);
+  return node;
+}

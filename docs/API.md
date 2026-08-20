@@ -101,7 +101,9 @@ document with ids stripped makes every block look new. See
 | GET | `/api/pages/:id/blocks` | `{rev, blocks[]}` — the page's blocks in document order |
 | GET | `/api/pages/:id/delta?since=N` | What changed since revision `N`: `{rev, full, blocks[], deleted[], order[]}`. `full: true` means the gap is too wide to answer incrementally — refetch the page. |
 | POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, orderKey?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `orderKey` is an explicit sort key for clients that compute one. A numeric `position` is still accepted and read as a slot index. |
+| POST | `/api/pages/move-many` | `{pageIds[], parentId?, spaceId?, index?}` — moves a whole selection into one slot. `pageIds` is in the order the pages should end up; the destination gap is split into that many order keys before anything is written, so the batch keeps its order. The batch is validated as a whole first, so a drop that breaks the nesting rule is refused entirely rather than half applied. |
 | DELETE | `/api/pages/:id` | Soft-delete subtree (trash) |
+| POST | `/api/pages/delete-many` | `{pageIds[]}` — soft-delete several subtrees in one statement; returns `{trashed}`, the number of pages that went to the trash including subpages |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |
 | GET | `/api/spaces/:id/trash` | |

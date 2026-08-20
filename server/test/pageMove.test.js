@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { siblingOrderKey, rewriteLinkSlugs } from '../src/lib/pageMove.js';
+import { siblingOrderKey, siblingOrderKeys, rewriteLinkSlugs } from '../src/lib/pageMove.js';
 import { isOrderKey } from '../src/lib/orderKey.js';
 
 const siblings = (...keys) => keys.map((order_key, i) => ({ id: `p${i}`, order_key }));
@@ -33,6 +33,60 @@ test('dropping between two pages lands strictly between them', () => {
 
 test('an index past the end of the list is clamped rather than leaving a hole', () => {
   assert.ok(siblingOrderKey(siblings('a1'), 99) > 'a1');
+});
+
+// ---- where a whole selection lands ----
+//
+// The property that matters is that a multi-page drop reads, afterwards, in the
+// order it was sent. Everything here is a way of that going wrong: keys that
+// repeat, keys that escape the gap, keys that come back shuffled.
+
+test('a batch dropped into a gap comes back in the order it was sent', () => {
+  const keys = siblingOrderKeys(siblings('a1', 'a5'), 1, 3);
+  assert.equal(keys.length, 3);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.equal(new Set(keys).size, 3);
+});
+
+test('every key in a batch stays inside the gap it was dropped into', () => {
+  for (const key of siblingOrderKeys(siblings('a1', 'a5'), 1, 4)) {
+    assert.ok(key > 'a1' && key < 'a5', key);
+    assert.ok(isOrderKey(key), key);
+  }
+});
+
+test('a batch dropped at the front lands before everything already there', () => {
+  const keys = siblingOrderKeys(siblings('a1', 'a2'), 0, 3);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.ok(keys.at(-1) < 'a1');
+});
+
+test('a batch dropped at the end lands after everything already there', () => {
+  const keys = siblingOrderKeys(siblings('a1', 'a2'), 2, 3);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.ok(keys[0] > 'a2');
+});
+
+test('a batch into an empty list is just a list', () => {
+  const keys = siblingOrderKeys([], 0, 5);
+  assert.equal(keys.length, 5);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.equal(new Set(keys).size, 5);
+});
+
+test('a batch of one behaves exactly like a single drop', () => {
+  const [key] = siblingOrderKeys(siblings('a1', 'a5'), 1, 1);
+  assert.ok(key > 'a1' && key < 'a5');
+});
+
+test('an empty batch asks for nothing', () => {
+  assert.deepEqual(siblingOrderKeys(siblings('a1'), 0, 0), []);
+});
+
+test('a batch index past the end is clamped, like a single drop', () => {
+  const keys = siblingOrderKeys(siblings('a1'), 99, 2);
+  assert.ok(keys[0] > 'a1');
+  assert.deepEqual(keys, [...keys].sort());
 });
 
 test('a negative index is clamped to the front', () => {
