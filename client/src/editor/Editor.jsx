@@ -22,7 +22,7 @@ import Mathematics from '@tiptap/extension-mathematics';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -38,6 +38,8 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
+import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
 
 const lowlight = createLowlight(common);
@@ -45,7 +47,7 @@ const lowlight = createLowlight(common);
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, placeholder = "Type '/' for commands…" }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…" }) {
   return [
     StarterKit.configure({ codeBlock: false, heading: { levels: [1, 2, 3, 4] } }),
     CodeBlockLowlight.configure({ lowlight }),
@@ -82,11 +84,22 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
         render: makeSuggestionRender(MentionList),
       },
     }),
-    SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
+    SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    DocumentBlock,
   ];
 }
+
+/** documentBlock attrs from a POST /pages/:id/documents response. */
+export const documentAttrs = (res) => ({
+  attachmentId: res.attachment.id,
+  url: res.url,
+  filename: res.attachment.filename,
+  mime: res.attachment.mime,
+  size: res.attachment.size,
+  kind: res.docKind,
+});
 
 export default function Editor({ content, editable = true, pageId, space, onUpdate, onReady }) {
   const { preferences } = useAuth();
@@ -104,6 +117,13 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
       }
     : null;
 
+  const { uploadDocument, prompt: documentPrompt } = useDocumentUpload(editable ? pageId : null);
+  // The editor's extensions are built once, so reach the current callback
+  // through a ref rather than baking in the one from the first render.
+  const uploadDocumentRef = useRef(uploadDocument);
+  uploadDocumentRef.current = uploadDocument;
+  const uploadDocumentStable = useCallback((file) => uploadDocumentRef.current?.(file) ?? null, []);
+
   // The [[link]] suggestion plugin runs outside React, so hand it the current
   // space through the module-level context before the editor can be typed in.
   linkContext.spaceId = space?.id ?? null;
@@ -111,7 +131,10 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
   linkContext.canWrite = Boolean(editable);
 
   const editor = useEditor({
-    extensions: buildExtensions({ uploadFile }),
+    extensions: buildExtensions({
+      uploadFile,
+      uploadDocument: pageId && editable ? uploadDocumentStable : null,
+    }),
     content,
     editable,
     onUpdate: ({ editor: e }) => onUpdate?.(e),
@@ -121,26 +144,14 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
         if (moved || !uploadFile || !event.dataTransfer?.files?.length) return false;
         event.preventDefault();
         const files = Array.from(event.dataTransfer.files);
-        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url, coords?.pos);
-          }
-        })();
+        // Drop lands where the pointer is, not where the caret was.
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+        handleFiles(view, files, pos);
         return true;
       },
       handlePaste: (view, event) => {
         if (!uploadFile || !event.clipboardData?.files?.length) return false;
-        const files = Array.from(event.clipboardData.files);
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url);
-          }
-        })();
+        handleFiles(view, Array.from(event.clipboardData.files));
         return true;
       },
     },
@@ -157,6 +168,36 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
   useEffect(() => {
     api.get('/api/users', { noRedirect: true }).then((d) => { userCache = d.users; }).catch(() => {});
   }, []);
+
+  // Dropped/pasted files, one at a time so a PPTX can stop and ask how it
+  // should be stored. `pos` is the drop point; each insertion moves it along so
+  // a multi-file drop keeps its order.
+  async function handleFiles(view, files, pos) {
+    let at = pos;
+    for (const file of files) {
+      if (uploadDocumentRef.current && docKindFor(file)) {
+        const res = await uploadDocumentRef.current(file);
+        if (!res) continue;
+        at = insertDocument(at, res);
+      } else {
+        const url = await uploadFile(file);
+        if (!url) continue;
+        insertUploaded(view, file, url, at);
+      }
+    }
+  }
+
+  // The bar is a block node and always sits on its own line. Returns the
+  // position just after it, for the next file in the batch.
+  function insertDocument(pos, res) {
+    const at = pos ?? editor.state.selection.from;
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(at, { type: 'documentBlock', attrs: documentAttrs(res) })
+      .run();
+    return editor.state.selection.to;
+  }
 
   function insertUploaded(view, file, url, pos) {
     const { schema } = view.state;
@@ -188,6 +229,7 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
       {editable && <BubbleToolbar editor={editor} />}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
+      {editable && documentPrompt}
     </div>
   );
 }

@@ -301,6 +301,26 @@
 .gd-drawio:hover .gd-node-edit-btn { opacity: 1; }
 .gd-drawio-preview { display: flex; justify-content: center; }
 .gd-drawio-preview img { max-width: 100%; }
+
+/* ---------- document bar (PDF / PPTX attachment) ---------- */
+.gd-document {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  background: var(--mantine-color-default);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.gd-document:hover { background: var(--mantine-color-default-hover); }
+.gd-document.is-selected { border-color: var(--mantine-color-blue-5); }
+.gd-document-icon { flex: none; color: var(--mantine-color-dimmed); }
+.gd-document-meta { flex: 1; min-width: 0; }
+.gd-document-name { line-height: 1.3; }
+.gd-document-actions { flex: none; display: flex; gap: 4px; }
 .gd-page-topbar {
   position: sticky; top: 0; z-index: 100;
   background: var(--mantine-color-body);

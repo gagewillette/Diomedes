@@ -5,7 +5,7 @@ import {
   IconLetterT, IconH1, IconH2, IconH3, IconList, IconListNumbers, IconListCheck,
   IconChevronRight, IconQuote, IconCode, IconTable, IconMinus, IconInfoCircle,
   IconPhoto, IconMovie, IconPaperclip, IconChartDots3, IconPencil, IconMathFunction,
-  IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3,
+  IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3, IconFileTypePdf,
 } from '@tabler/icons-react';
 import { makeSuggestionRender } from './suggestionRender.js';
 
@@ -18,7 +18,7 @@ const pickFile = (accept) =>
     input.click();
   });
 
-export function buildSlashItems({ uploadFile }) {
+export function buildSlashItems({ uploadFile, uploadDocument }) {
   const items = [
     { title: 'Text', desc: 'Plain paragraph', icon: IconLetterT, kw: 'paragraph plain',
       run: (e, r) => e.chain().focus().deleteRange(r).setParagraph().run() },
@@ -84,6 +84,37 @@ export function buildSlashItems({ uploadFile }) {
         .insertContent(new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))
         .run() },
   ];
+
+  if (uploadDocument) {
+    items.push({
+      title: 'Document',
+      desc: 'Upload a PDF or PowerPoint',
+      icon: IconFileTypePdf,
+      kw: 'pdf pptx powerpoint slides presentation attachment upload',
+      run: async (e, r) => {
+        e.chain().focus().deleteRange(r).run();
+        const file = await pickFile('.pdf,.ppt,.pptx');
+        if (!file) return;
+        const at = e.state.selection.from;
+        const res = await uploadDocument(file);
+        if (!res) return;
+        e.chain()
+          .focus()
+          .insertContentAt(at, {
+            type: 'documentBlock',
+            attrs: {
+              attachmentId: res.attachment.id,
+              url: res.url,
+              filename: res.attachment.filename,
+              mime: res.attachment.mime,
+              size: res.attachment.size,
+              kind: res.docKind,
+            },
+          })
+          .run();
+      },
+    });
+  }
 
   if (uploadFile) {
     items.push(
