@@ -6,7 +6,7 @@ import {
 import { useDisclosure, useHotkeys } from '@mantine/hooks';
 import {
   IconSearch, IconHome, IconPlus, IconSun, IconMoon, IconLogout, IconSettings,
-  IconUsers, IconChevronDown, IconChevronRight, IconLayoutSidebarLeftCollapse,
+  IconUsers, IconChevronDown, IconChevronRight, IconLayoutSidebarLeftCollapse, IconBuilding,
 } from '@tabler/icons-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -97,9 +97,14 @@ export default function Layout({ children }) {
                   Account settings
                 </Menu.Item>
                 {isAdmin && (
-                  <Menu.Item leftSection={<IconUsers size={14} />} component={Link} to="/settings/members">
-                    Manage users
-                  </Menu.Item>
+                  <>
+                    <Menu.Item leftSection={<IconUsers size={14} />} component={Link} to="/settings/members">
+                      Manage users
+                    </Menu.Item>
+                    <Menu.Item leftSection={<IconBuilding size={14} />} component={Link} to="/settings/workspace">
+                      Workspace settings
+                    </Menu.Item>
+                  </>
                 )}
                 <Menu.Divider />
                 <Menu.Item leftSection={<IconLogout size={14} />} onClick={logout}>Log out</Menu.Item>

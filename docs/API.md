@@ -29,10 +29,16 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 ### Auth & profile
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/auth/me` | Current user + workspace name + preferences |
+| GET | `/api/auth/me` | Current user + workspace name + workspace settings + preferences |
 | PATCH | `/api/auth/preferences` | `{preferences: {...}}` — user-scoped UI/editor prefs (≤8KB) |
 | PATCH | `/api/auth/profile` | `{name}` |
 | POST | `/api/auth/change-password` | `{current, next}` (session only) |
+
+### Workspace settings
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}}}` — any member |
+| PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
 
 ### API tokens (session only for creation)
 | Method | Path | Notes |
@@ -82,7 +88,7 @@ Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagra
 ### Files
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}` |
+| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}`. 403 when workspace file uploads are off |
 | GET | `/api/files/:id/:filename` | Auth or public-if-page-shared |
 
 ## MCP server sketch

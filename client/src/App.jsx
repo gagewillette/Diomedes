@@ -10,6 +10,7 @@ import SpaceHome from './pages/SpaceHome.jsx';
 import PageEditor from './pages/PageEditor.jsx';
 import Settings from './pages/Settings.jsx';
 import MembersAdmin from './pages/MembersAdmin.jsx';
+import WorkspaceSettings from './pages/WorkspaceSettings.jsx';
 import SharePage from './pages/SharePage.jsx';
 import { onNavigate } from './lib/api.js';
 
@@ -57,6 +58,7 @@ export default function App() {
                   <Route path="/s/:slug/p/:pageId" element={<PageEditor />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/members" element={<MembersAdmin />} />
+                  <Route path="/settings/workspace" element={<WorkspaceSettings />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>

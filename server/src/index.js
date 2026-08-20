@@ -15,6 +15,7 @@ import spaceRoutes from './routes/spaces.js';
 import pageRoutes from './routes/pages.js';
 import fileRoutes, { STORAGE_PATH } from './routes/files.js';
 import tokenRoutes from './routes/tokens.js';
+import workspaceRoutes from './routes/workspace.js';
 import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
 
@@ -60,6 +61,7 @@ async function main() {
   app.use('/api/spaces', spaceRoutes);
   app.use('/api/tokens', tokenRoutes);
   app.use('/api/events', eventRoutes);
+  app.use('/api/workspace', workspaceRoutes);
   // fileRoutes first: it contains the unauthenticated /public and /files routes,
   // while pageRoutes guards its whole router with requireAuth.
   app.use('/api', fileRoutes);

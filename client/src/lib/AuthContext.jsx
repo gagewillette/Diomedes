@@ -3,18 +3,29 @@ import { notifications } from '@mantine/notifications';
 import { api } from './api.js';
 import { startRealtime } from './realtime.js';
 import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
+import { mergeWorkspace, DEFAULT_WORKSPACE } from './workspace.js';
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [state, setState] = useState({ loading: true, user: null, workspaceName: 'Diomedes' });
+  const [state, setState] = useState({
+    loading: true,
+    user: null,
+    workspaceName: DEFAULT_WORKSPACE.name,
+    workspace: DEFAULT_WORKSPACE,
+  });
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.get('/api/auth/me', { noRedirect: true });
-      setState({ loading: false, user: data.user, workspaceName: data.workspaceName });
+      setState({
+        loading: false,
+        user: data.user,
+        workspaceName: data.workspaceName,
+        workspace: mergeWorkspace(data.workspace),
+      });
     } catch {
       setState((s) => ({ ...s, loading: false, user: null }));
     }
@@ -50,6 +61,15 @@ export function AuthProvider({ children }) {
         case 'users-changed':
           emit('users-changed', detail);
           break;
+        case 'workspace-settings-changed':
+          // Workspace-wide switches take effect everywhere at once: the payload
+          // carries the new settings, so no refetch is needed.
+          setState((s) => ({
+            ...s,
+            workspace: mergeWorkspace(detail.workspace),
+            workspaceName: detail.workspace?.name || s.workspaceName,
+          }));
+          break;
         case 'reconnected':
           // Anything pushed while the stream was down was missed; re-sync.
           refresh();
@@ -80,9 +100,26 @@ export function AuthProvider({ children }) {
     [state.user?.preferences] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Admin-only write; every browser (including this one) picks the change up
+  // again over SSE, which is what keeps other tabs in step.
+  const updateDataSavings = useCallback(async (partial) => {
+    const data = await api.patch('/api/workspace/settings/data-savings', { dataSavings: partial });
+    setState((s) => ({ ...s, workspace: mergeWorkspace(data.workspace) }));
+    return data.workspace;
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ ...state, refresh, logout, isAdmin, preferences, updatePreferences }}
+      value={{
+        ...state,
+        refresh,
+        logout,
+        isAdmin,
+        preferences,
+        updatePreferences,
+        dataSavings: state.workspace.dataSavings,
+        updateDataSavings,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -90,4 +127,10 @@ export function AuthProvider({ children }) {
 }
 
 // Safe outside AuthProvider (public share pages): falls back to defaults.
-export const useAuth = () => useContext(AuthContext) || { user: null, preferences: DEFAULT_PREFS };
+export const useAuth = () =>
+  useContext(AuthContext) || {
+    user: null,
+    preferences: DEFAULT_PREFS,
+    workspace: DEFAULT_WORKSPACE,
+    dataSavings: DEFAULT_WORKSPACE.dataSavings,
+  };

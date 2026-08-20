@@ -1,6 +1,12 @@
 // One SSE connection per tab, opened once the user is known. The server pushes
 // membership/role changes so the UI updates without a manual refresh.
-const EVENT_TYPES = ['spaces-changed', 'space-members-changed', 'users-changed', 'account-changed'];
+const EVENT_TYPES = [
+  'spaces-changed',
+  'space-members-changed',
+  'users-changed',
+  'account-changed',
+  'workspace-settings-changed',
+];
 
 const MAX_ATTEMPTS = 8;
 const MAX_BACKOFF_MS = 30_000;

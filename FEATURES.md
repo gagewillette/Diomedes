@@ -71,6 +71,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Page-level permissions (Enterprise) | ➖ Space-level scoping only |
 | API & MCP | ✅ Bearer API tokens (Settings → API tokens) work on every endpoint alongside sessions; full surface documented in docs/API.md with an MCP tool sketch |
 | User preferences (docmost: theme/language) | ✅ Per-user editor prefs: font, size, line spacing, page width, smooth caret, animations |
+| Workspace-wide settings | ✅ Settings → Workspace settings (admins only): **Data savings** — turn off live pointers, turn off file uploads. Existing files keep working when uploads are off |
 
 ## Infrastructure parity
 

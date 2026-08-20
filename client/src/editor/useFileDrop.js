@@ -35,7 +35,7 @@ function dropPos(view, event) {
  *
  * Returns `{ ref, isOver }` — put `ref` on the editor wrapper.
  */
-export function useFileDrop({ editor, enabled, onFiles }) {
+export function useFileDrop({ editor, enabled, onFiles, onBlocked }) {
   const [isOver, setIsOver] = useState(false);
   const ref = useRef(null);
   // dragenter/dragleave fire once per child element crossed, so count depth
@@ -43,8 +43,8 @@ export function useFileDrop({ editor, enabled, onFiles }) {
   const depth = useRef(0);
 
   // The listeners are bound once; reach the current props through a ref.
-  const latest = useRef({ editor, enabled, onFiles });
-  latest.current = { editor, enabled, onFiles };
+  const latest = useRef({ editor, enabled, onFiles, onBlocked });
+  latest.current = { editor, enabled, onFiles, onBlocked };
 
   useEffect(() => {
     const el = ref.current;
@@ -82,9 +82,15 @@ export function useFileDrop({ editor, enabled, onFiles }) {
       event.stopPropagation();
       clear();
 
-      const { editor: ed, enabled: on, onFiles: handle } = latest.current;
+      const { editor: ed, enabled: on, onFiles: handle, onBlocked: blocked } = latest.current;
       const files = Array.from(event.dataTransfer.files || []);
-      if (!on || !ed || !files.length) return;
+      if (!files.length) return;
+      // Still swallow the drop when uploads are off — letting it through would
+      // hand the file to the browser, which navigates away from the page.
+      if (!on || !ed) {
+        blocked?.(files);
+        return;
+      }
       handle(files, dropPos(ed.view, event));
     };
 
