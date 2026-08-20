@@ -31,7 +31,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Find & replace in page | ➖ Browser Ctrl+F works for finding |
 | Text color / highlight color | ✅ |
 | Sub/superscript, underline, strikethrough | ✅ |
-| Drag handle block reordering | ➖ Not in v1 (cut/paste blocks works) |
+| Drag handle block reordering | ✅ Hover grip to the left of any block; drag to reorder, or Alt+Shift+↑/↓. The move is saved as a new fractional order key on the one block that moved |
 | Synced blocks, Status chips, Date chip, Subpages block, page labels | ➖ Not in v1 |
 | AI features | ➖ Intentionally excluded |
 

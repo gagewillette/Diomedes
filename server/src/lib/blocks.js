@@ -30,8 +30,8 @@
 //     fix re-embeds one or two chunks instead of the whole page,
 //   * a per-block `rev`, so `GET /pages/:id/delta?since=` can answer "what
 //     changed" without shipping the document,
-//   * an order key per block, so a future block drag handle can reorder by
-//     writing one row.
+//   * an order key per block, so the block drag handle
+//     (client/src/editor/blockDrag.js) reorders by writing one row.
 import crypto from 'node:crypto';
 import { extractText } from './util.js';
 import { generateKeyBetween, generateNKeysBetween, isOrderKey } from './orderKey.js';
@@ -128,46 +128,88 @@ export function splitBlocks(content) {
 }
 
 /**
+ * The longest ascending run of stored keys — the blocks whose keys can stay.
+ *
+ * Keeping keys greedily from the left is not good enough once blocks can be
+ * dragged. Move the last paragraph of a forty-block page to the top and a
+ * greedy pass keeps that one key and rewrites the other thirty-nine, because
+ * every one of them now sorts below the block above it. Each rewritten row
+ * takes the new page rev, so a reorder that changed no text at all would report
+ * thirty-nine changed blocks to the delta endpoint and hand the embedding queue
+ * thirty-nine blocks to re-embed.
+ *
+ * The right answer is the longest *increasing subsequence* of the stored keys:
+ * the largest set that is already in the right order relative to each other, so
+ * that only what genuinely has to move gets a new key. For that same drag it
+ * keeps thirty-nine and rewrites one.
+ *
+ * Patience sorting, O(n log n), over string comparison — the same comparison
+ * the database sorts by (see the collation note in orderKey.js).
+ */
+function keepableIndices(stored) {
+  const tails = []; // index of the smallest tail key for each run length
+  const previous = new Array(stored.length).fill(-1);
+
+  for (let i = 0; i < stored.length; i++) {
+    if (stored[i] === null) continue;
+    // First run whose tail is not smaller than this key: extending it would
+    // break strictness, so this key replaces that tail instead.
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (stored[tails[mid]] < stored[i]) lo = mid + 1;
+      else hi = mid;
+    }
+    previous[i] = lo > 0 ? tails[lo - 1] : -1;
+    tails[lo] = i;
+  }
+
+  const kept = [];
+  let at = tails.length ? tails[tails.length - 1] : -1;
+  while (at !== -1) {
+    kept.push(at);
+    at = previous[at];
+  }
+  return kept.reverse();
+}
+
+/**
  * Order keys for a block list, reusing what is already stored wherever the
  * stored key still sorts correctly.
  *
  * Rewriting every key on every save would work and would be much simpler, but
  * it would make each save touch every row of a long page, and it would move
  * blocks whose `rev` should not have changed — which is precisely the signal
- * the delta endpoint and the embedding queue read. So a key is kept unless
- * keeping it would break the ordering, and only the runs that actually need
- * new keys get them.
+ * the delta endpoint and the embedding queue read. So the keys that are already
+ * in the right order relative to each other are kept, and only the blocks
+ * between them get new ones.
  */
 export function assignOrderKeys(blocks, existing) {
+  const stored = blocks.map((block) => {
+    const key = existing.get(block.blockId);
+    return isOrderKey(key) ? key : null;
+  });
+  const keep = new Set(keepableIndices(stored));
   const keys = new Array(blocks.length);
-  let prev = null;
-  let i = 0;
 
+  let i = 0;
   while (i < blocks.length) {
-    const current = existing.get(blocks[i].blockId);
-    if (isOrderKey(current) && (prev === null || current > prev)) {
-      keys[i] = current;
-      prev = current;
+    if (keep.has(i)) {
+      keys[i] = stored[i];
       i++;
       continue;
     }
-    // A run of blocks that need fresh keys, ending at the first block whose
-    // stored key can still be reused as the run's upper bound.
+    // A run of blocks needing fresh keys, bounded below by whatever the
+    // previous block ended up with and above by the next key being kept.
     let end = i;
-    let next = null;
-    while (end < blocks.length) {
-      const candidate = existing.get(blocks[end].blockId);
-      if (isOrderKey(candidate) && (prev === null || candidate > prev)) {
-        next = candidate;
-        break;
-      }
-      end++;
-    }
+    while (end < blocks.length && !keep.has(end)) end++;
+    const before = i > 0 ? keys[i - 1] : null;
+    const after = end < blocks.length ? stored[end] : null;
     const count = end - i;
     const fresh =
-      count === 1 ? [generateKeyBetween(prev, next)] : generateNKeysBetween(prev, next, count);
+      count === 1 ? [generateKeyBetween(before, after)] : generateNKeysBetween(before, after, count);
     for (let j = 0; j < count; j++) keys[i + j] = fresh[j];
-    prev = fresh[count - 1];
     i = end;
   }
   return keys;

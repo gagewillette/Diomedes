@@ -5,8 +5,8 @@ scratch. React + Mantine + TipTap frontend, Express + PostgreSQL + Redis backend
 shipped as a single versioned Docker image.
 
 **Editor**: markdown paste with auto-formatting, markdown typing shortcuts, slash
-commands, Word-style smooth caret, tables, task lists, syntax-highlighted code, KaTeX
-math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads,
+commands, drag-handle block reordering, Word-style smooth caret, tables, task
+lists, syntax-highlighted code, KaTeX math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads,
 **PDF and PowerPoint documents** — and three integrated diagram editors:
 **Mermaid**, **Excalidraw**, and **Draw.io**.
 
