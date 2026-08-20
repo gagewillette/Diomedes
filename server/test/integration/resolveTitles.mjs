@@ -1,151 +1,167 @@
-// End-to-end for POST /api/pages/resolve-titles — the lookup a machine writing
-// `[[links]]` uses instead of the autocomplete. Run against a server pointed at
-// a throwaway database:
-//   DATABASE_URL=... PORT=3111 node src/index.js
-//   BASE_URL=http://localhost:3111 node test/integration/resolveTitles.mjs
-const B = process.env.BASE_URL || 'http://localhost:3111';
-
-let cookie = '';
-async function api(method, path, body) {
-  const res = await fetch(`${B}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const setCookie = res.headers.get('set-cookie');
-  if (setCookie) cookie = setCookie.split(';')[0];
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from ${method} ${path}: ${text}`);
-  }
-  return data;
-}
-
-const ok = (msg) => console.log(`  ok  ${msg}`);
-function assert(cond, msg) {
-  if (!cond) {
-    console.error(`  FAIL ${msg}`);
-    process.exit(1);
-  }
-  ok(msg);
-}
-
-await api('POST', '/api/auth/setup', {
-  workspaceName: 'E2E',
-  name: 'Tester',
-  username: 'tester',
-  password: 'password123',
-});
-const { spaces } = await api('GET', '/api/spaces');
-const space = spaces[0].id;
-ok(`space ${space}`);
-
-const secondSpace = (await api('POST', '/api/spaces', { name: 'Other', slug: 'other' })).space.id;
-ok(`second space ${secondSpace}`);
-
-const newPage = async (spaceId, title) =>
-  (await api('POST', '/api/pages', { spaceId, title })).page.id;
-
-// ---- cause #1: the answer sits outside link-search's twelve-row window ----
+// The exact-title lookup behind `POST /api/pages/resolve-titles`, against a
+// real postgres.
 //
-// The page actually titled "Overview", then twenty whose titles merely contain
-// the word. Ranked by `updated_at DESC`, the twenty newer ones fill the whole
-// window and the exact match is never returned.
-const overview = await newPage(space, 'Overview');
-for (let i = 0; i < 20; i++) await newPage(space, `Service Overview ${i}`);
+// Not part of the unit suite (that one must run without a database), and it
+// really does need one: what is being checked is the SQL — the normalization
+// has to agree with the expression the title index is built on, the match has
+// to be on the whole title rather than a substring, and a page in the trash has
+// to stop answering. `pickTitleMatch` is unit-tested separately; this is the
+// half that only postgres can answer.
+//
+// The fixture is deliberately the shape that broke `link-search` (issue #66):
+// one page titled "Overview", buried under twenty newer pages whose titles
+// merely contain the word. That endpoint matches `ILIKE '%q%'`, ranks by
+// `updated_at DESC` and stops at twelve rows, so the page being looked for is
+// not in the answer at all. This lookup does not care how many pages share a
+// substring, or which was touched last.
+import { q, pool, migrate } from '../../src/db.js';
+import { lookupTitles, pickTitleMatch, normalizeTitle } from '../../src/lib/links.js';
+import { accessibleSpacesQuery } from '../../src/lib/auth.js';
+import { generateKeyBetween } from '../../src/lib/orderKey.js';
+import assert from 'node:assert/strict';
 
-const search = await (
-  await fetch(`${B}/api/pages/link-search?q=Overview&spaceId=${space}`, { headers: { cookie } })
-).json();
-assert(
-  search.pages.length === 12 && !search.pages.some((p) => p.id === overview),
-  'link-search truncates: the exact match is not in its twelve rows'
+const ok = (label) => console.log(`  ok  ${label}`);
+
+await migrate();
+ok('migrate() ran, including the normalized-title index');
+
+const stamp = Date.now();
+const { rows: users } = await q(
+  `INSERT INTO users (username, name, password_hash, role) VALUES ($1,'Titles','x','owner') RETURNING id`,
+  [`titles-${stamp}`]
 );
+const userId = users[0].id;
+const user = { id: userId, role: 'owner' };
+const acc = accessibleSpacesQuery(user);
 
-const one = await api('POST', '/api/pages/resolve-titles', { spaceId: space, titles: ['Overview'] });
-assert(
-  one.results.Overview.status === 'ok' && one.results.Overview.id === overview,
-  'resolve-titles finds it anyway — the regression case from issue #66'
-);
+const makeSpace = async (name) => {
+  const { rows } = await q(
+    `INSERT INTO spaces (name, slug, created_by) VALUES ($1,$2,$3) RETURNING id`,
+    [name, `${name.toLowerCase()}-${stamp}`, userId]
+  );
+  return rows[0].id;
+};
+const spaceId = await makeSpace('Titles');
+const otherSpaceId = await makeSpace('Elsewhere');
 
-// ---- normalization matches how links are written ----
-const arch = await newPage(space, 'Architecture');
-const norm = await api('POST', '/api/pages/resolve-titles', {
-  spaceId: space,
-  titles: ['  ARCHITECTURE  ', 'architecture'],
-});
-assert(
-  norm.results['  ARCHITECTURE  '].id === arch && norm.results.architecture.id === arch,
-  'case and surrounding whitespace do not change the answer'
-);
+let n = 0;
+const makePage = async (space, title) => {
+  const { rows } = await q(
+    `INSERT INTO pages (space_id, title, order_key, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$4) RETURNING id`,
+    [space, title, generateKeyBetween(null, null) + String(n++).padStart(3, '0'), userId]
+  );
+  return rows[0].id;
+};
 
-// ---- a batch is one round trip, and answers every title asked ----
-const auth = await newPage(space, 'Auth Service');
-const batch = await api('POST', '/api/pages/resolve-titles', {
-  spaceId: space,
-  titles: ['Architecture', 'Auth Service', 'Never Written'],
-});
-assert(
-  batch.results.Architecture.id === arch &&
-    batch.results['Auth Service'].id === auth &&
-    batch.results['Never Written'].status === 'not_found',
-  'a whole document of links resolves in one request'
-);
-assert(
-  batch.results.Architecture.space_slug === spaces[0].slug,
-  'a resolved page carries the slug a link needs for its href'
-);
+// Resolve one title the way the route does.
+const resolve = async (title, prefer = spaceId) => {
+  const byKey = await lookupTitles([title], acc);
+  return pickTitleMatch(byKey.get(normalizeTitle(title)), prefer);
+};
 
-// ---- the space being written in wins; a real tie is reported ----
-await newPage(secondSpace, 'Architecture');
-const preferred = await api('POST', '/api/pages/resolve-titles', {
-  spaceId: space,
-  titles: ['Architecture'],
-});
-assert(
-  preferred.results.Architecture.status === 'ok' && preferred.results.Architecture.id === arch,
-  'the same title in another space does not make the local one ambiguous'
-);
+// ---- the exact match is found however many substrings bury it ----
+const overview = await makePage(spaceId, 'Overview');
+for (let i = 0; i < 20; i++) await makePage(spaceId, `Service Overview ${i}`);
 
-const crossSpace = await api('POST', '/api/pages/resolve-titles', { titles: ['Architecture'] });
-assert(
-  crossSpace.results.Architecture.status === 'ambiguous' &&
-    crossSpace.results.Architecture.candidates.length === 2,
-  'with no space to prefer, two pages titled the same are ambiguous'
-);
+{
+  const match = await resolve('Overview');
+  assert.equal(match.status, 'ok');
+  assert.equal(match.page.id, overview, 'the page titled exactly that, not one merely containing it');
+  ok('an exact title buried under twenty substring matches still resolves');
+}
 
-const dupe = await newPage(space, 'Architecture');
-const tie = await api('POST', '/api/pages/resolve-titles', {
-  spaceId: space,
-  titles: ['Architecture'],
-});
-assert(
-  tie.results.Architecture.status === 'ambiguous' &&
-    tie.results.Architecture.candidates.map((p) => p.id).includes(dupe),
-  'two pages titled the same in one space are reported, never guessed'
-);
+// ---- normalization matches how titles are compared everywhere else ----
+const arch = await makePage(spaceId, 'Architecture');
+{
+  for (const written of ['  ARCHITECTURE  ', 'architecture', 'Architecture']) {
+    const match = await resolve(written);
+    assert.equal(match.status, 'ok', `"${written}" resolves`);
+    assert.equal(match.page.id, arch);
+  }
+  ok('case, surrounding space, and inner runs of space make no difference');
 
-// ---- a deleted page stops answering ----
-await api('DELETE', `/api/pages/${dupe}`);
-const afterDelete = await api('POST', '/api/pages/resolve-titles', {
-  spaceId: space,
-  titles: ['Architecture'],
-});
-assert(
-  afterDelete.results.Architecture.status === 'ok' && afterDelete.results.Architecture.id === arch,
-  'trashing the duplicate resolves the ambiguity'
-);
+  const inner = await makePage(spaceId, 'Design   Docs');
+  const match = await resolve('Design Docs');
+  assert.equal(match.page.id, inner, 'the stored title is normalized too, not just the query');
+  ok('a title stored with a double space answers to the single-spaced one');
+}
 
-// ---- limits and empty input ----
-const empty = await api('POST', '/api/pages/resolve-titles', { spaceId: space, titles: [] });
-assert(Object.keys(empty.results).length === 0, 'an empty batch is an empty answer, not an error');
+// ---- a batch is one query, and every title asked for is answered ----
+{
+  const asked = ['Overview', 'Architecture', 'Never Written'];
+  const byKey = await lookupTitles(asked, acc);
+  assert.equal(byKey.size, 3);
+  assert.equal(byKey.get('overview')[0].id, overview);
+  assert.equal(byKey.get('architecture')[0].id, arch);
+  assert.deepEqual(byKey.get('never written'), [], 'a title nothing carries comes back empty, not missing');
+  ok('a whole document of links is answered by one query');
 
-const tooMany = await fetch(`${B}/api/pages/resolve-titles`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', cookie },
-  body: JSON.stringify({ titles: Array.from({ length: 201 }, (_, i) => `T${i}`) }),
-});
-assert(tooMany.status === 400, 'a batch over the cap is refused rather than silently truncated');
+  const row = byKey.get('architecture')[0];
+  assert.ok(row.space_slug && row.space_id, 'a hit carries what a link node needs');
+  ok('a hit carries the slug a link needs for its href');
+}
 
+// ---- space preference, and real ties ----
+{
+  await makePage(otherSpaceId, 'Architecture');
+  const local = await resolve('Architecture', spaceId);
+  assert.equal(local.status, 'ok');
+  assert.equal(local.page.id, arch, 'the space being written in wins');
+
+  const elsewhere = await resolve('Architecture', otherSpaceId);
+  assert.equal(elsewhere.status, 'ok');
+  assert.notEqual(elsewhere.page.id, arch, 'and so does the other space, from over there');
+
+  const neither = await resolve('Architecture', null);
+  assert.equal(neither.status, 'ambiguous');
+  assert.equal(neither.candidates.length, 2, 'with no space to prefer, a tie is a tie');
+  ok('the same title in two spaces resolves locally, and is ambiguous with no space');
+
+  const dupe = await makePage(spaceId, 'Architecture');
+  const tie = await resolve('Architecture', spaceId);
+  assert.equal(tie.status, 'ambiguous', 'two pages titled the same in one space are never guessed at');
+  assert.ok(tie.candidates.map((p) => p.id).includes(dupe));
+  ok('two pages titled the same in one space are reported as ambiguous');
+
+  // ---- the trash stops answering ----
+  await q('UPDATE pages SET deleted_at = now() WHERE id = $1', [dupe]);
+  const afterTrash = await resolve('Architecture', spaceId);
+  assert.equal(afterTrash.status, 'ok');
+  assert.equal(afterTrash.page.id, arch, 'trashing the duplicate settles it');
+  ok('a trashed page is not a link target');
+}
+
+// ---- what the caller cannot read, they cannot resolve ----
+{
+  const { rows: strangers } = await q(
+    `INSERT INTO users (username, name, password_hash, role) VALUES ($1,'Stranger','x','member') RETURNING id`,
+    [`stranger-${stamp}`]
+  );
+  const strangerAcc = accessibleSpacesQuery({ id: strangers[0].id, role: 'member' });
+  const byKey = await lookupTitles(['Overview'], strangerAcc);
+  assert.deepEqual(byKey.get('overview'), [], 'a private space is invisible to a non-member');
+  ok('resolution never reaches outside the caller\'s spaces');
+}
+
+// ---- empty input costs nothing ----
+{
+  const byKey = await lookupTitles([], acc);
+  assert.equal(byKey.size, 0);
+  const blanks = await lookupTitles(['', '   '], acc);
+  assert.equal(blanks.size, 0, 'a blank title is not a query');
+  ok('an empty batch is an empty answer');
+}
+
+// ---- the index the lookup is meant to read ----
+{
+  const { rows } = await q(
+    `SELECT indexdef FROM pg_indexes WHERE tablename = 'pages' AND indexname = 'pages_title_norm_idx'`
+  );
+  assert.equal(rows.length, 1, 'pages_title_norm_idx should exist after migrate()');
+  assert.match(rows[0].indexdef, /space_id/, 'and be keyed by space first');
+  ok('the normalized-title index is in place');
+}
+
+await pool.end();
 console.log('resolve-titles: all checks passed');
