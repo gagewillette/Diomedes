@@ -8,6 +8,7 @@ import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
 import { movePage, siblingOrderKeys } from '../lib/pageMove.js';
 import { writePageBody } from '../lib/pageBody.js';
+import { pageSubtree } from '../lib/subtree.js';
 import { generateKeyBetween } from '../lib/orderKey.js';
 import { publish, spaceAudience } from '../lib/events.js';
 
@@ -219,6 +220,21 @@ router.get(
       page.id,
     ]);
     res.json({ page, myRole, breadcrumbs: crumbs, space: space[0], isFavorite: fav.length > 0 });
+  })
+);
+
+// A page and every page beneath it, in one request. This is what "export the
+// subtree" runs on: the alternative is one request per page, which gets slower
+// exactly as the tree gets deeper. The walk itself — and the reason it has no
+// depth limit — lives in lib/subtree.js.
+router.get(
+  '/pages/:id/subtree',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    // Reader, not writer: reading your own space out is a read.
+    await assertSpaceRole(req.user, page.space_id, 'reader');
+    const withContent = req.query.content === '1' || req.query.content === 'true';
+    res.json({ pages: await pageSubtree(page.id, { withContent }) });
   })
 );
 
