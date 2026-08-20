@@ -13,6 +13,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { buildSectionIndex, findSectionRefs, refAriaLabel, resolveRef } from '../lib/sectionRefs.js';
+import { scrollToElement } from '../lib/scrollTo.js';
 
 export const sectionRefPluginKey = new PluginKey('sectionRef');
 
@@ -107,8 +108,11 @@ export function scrollToHeading(view, entry) {
   const dom = view.nodeDOM(entry.pos);
   if (!dom || dom.nodeType !== 1) return false;
 
-  const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  dom.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+  // `scrollIntoView({ block: 'start' })` puts the heading flush with the top of
+  // the scroller, which is *underneath* the sticky page topbar — the reader
+  // arrives at a section whose heading they cannot see. lib/scrollTo does the
+  // same jump with the header's height subtracted.
+  scrollToElement(dom, { flash: false, focus: false });
 
   // A smooth scroll ends with the heading at the top of the viewport and no
   // other signal that anything happened; the flash is what tells the eye where
@@ -160,6 +164,28 @@ export function headingForHash(index, rawHash) {
   return /^\d+(\.\d+)*$/.test(numeric) ? resolveRef(index, numeric) : null;
 }
 
+/**
+ * The heading an in-page link points at, or null when it points somewhere else.
+ *
+ * A hand-written `[Changing models](#changing-models-or-dimensions)` is the
+ * plainest way to link a section — it is what every markdown author reaches
+ * for, it survives export, and it is what a page imported from GitHub or Notion
+ * already contains. Only `#…` hrefs qualify: anything with a path in it is a
+ * link to another page and belongs to the router, not to us.
+ */
+export function anchorTarget(index, href) {
+  return href && href.startsWith('#') ? headingForHash(index, href) : null;
+}
+
+/** The heading named by the in-page anchor an event landed on, if any. */
+function anchorHit(view, event) {
+  const from = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
+  const anchor = from?.closest?.('a[href]');
+  if (!anchor || !view.dom.contains(anchor)) return null;
+  const index = sectionRefPluginKey.getState(view.state)?.index;
+  return anchorTarget(index, anchor.getAttribute('href'));
+}
+
 export const SectionRef = Extension.create({
   name: 'sectionRef',
 
@@ -189,13 +215,30 @@ export const SectionRef = Extension.create({
             mousedown(view, event) {
               const from = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
               const el = from?.closest?.(`[${SECTION_REF_ATTR}][role="link"]`);
-              if (!el) return false;
-              // While editing, a plain click has to keep placing the caret —
-              // the author is writing the sentence the reference sits in. The
-              // modifier is the same one that follows a link in every editor.
-              if (view.editable && !(event.metaKey || event.ctrlKey)) return false;
+              if (el) {
+                // While editing, a plain click has to keep placing the caret —
+                // the author is writing the sentence the reference sits in. The
+                // modifier is the same one that follows a link in every editor.
+                if (view.editable && !(event.metaKey || event.ctrlKey)) return false;
+                event.preventDefault();
+                return jumpToSection(view, el.getAttribute(SECTION_REF_ATTR));
+              }
+
+              // An anchor link is ordinary text carrying a link mark, so a
+              // plain click inside a contenteditable would otherwise drop the
+              // caret in the middle of the link text and go nowhere. Following
+              // on a plain click matches the wiki-link chips, which navigate
+              // while editing too; Alt-click is the way back in for an author
+              // who wants to edit the link's own words.
+              if (event.altKey || event.button !== 0) return false;
+              const target = anchorHit(view, event);
+              if (!target) return false;
+              // Claim the event outright. Letting ProseMirror run its own
+              // mousedown puts the selection inside the link and scrolls the
+              // caret back into view a frame after we jump — the reader would
+              // watch the page arrive at the section and then leave it again.
               event.preventDefault();
-              return jumpToSection(view, el.getAttribute(SECTION_REF_ATTR));
+              return scrollToHeading(view, target);
             },
             keydown(view, event) {
               if (event.key !== 'Enter' && event.key !== ' ') return false;

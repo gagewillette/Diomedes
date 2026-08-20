@@ -16,7 +16,9 @@ import {
 import { movePage, siblingOrderKeys } from '../lib/pageMove.js';
 import { writePageBody } from '../lib/pageBody.js';
 import { pageSubtree } from '../lib/subtree.js';
+import { restorePage } from '../lib/pageRestore.js';
 import { generateKeyBetween } from '../lib/orderKey.js';
+import { assertDepthFits, pageLevel, subtreeHeight } from '../lib/pageDepth.js';
 import { publish, spaceAudience } from '../lib/events.js';
 
 const router = Router();
@@ -28,13 +30,12 @@ const VERSION_INTERVAL_MIN = 10;
 // and one created empty go down the same insert path.
 const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
 
-// The page tree is one level of subpages deep, no more. Lifting that limit is
-// tracked as its own piece of work; until then the rule lives on the server so
-// no client can get around it. The matching rule for *moves* is in movePage,
-// where it can read the same locked rows the move writes.
-function assertCanTakeChildren(parent) {
-  if (parent.parent_id) throw httpError(400, 'Pages can only be nested one level deep');
-}
+// The page tree nests to any depth up to MAX_PAGE_DEPTH; see lib/pageDepth.js
+// for why a limit still exists at all. The rule lives on the server so no client
+// can get around it. The matching rule for *moves* is in movePage, where it can
+// read the same locked rows the move writes — the depth checks on the routes
+// here are advisory, there to fail before the work starts rather than partway
+// through it.
 
 const accessibleSpacesCTE = accessibleSpacesQuery;
 
@@ -90,27 +91,40 @@ router.get(
 
     const conds = [`p.deleted_at IS NULL`, `p.space_id IN (${acc.sql})`];
     if (query) conds.push(`p.title ILIKE ${bind(`%${query}%`)}`);
-    if (req.query.exclude) conds.push(`p.id <> ${bind(req.query.exclude)}`);
-    // Only a top-level page can take children, so the parent picker never
-    // offers a subpage as a destination.
-    if (req.query.topLevelOnly) conds.push(`p.parent_id IS NULL`);
+    // `exclude` is a list, not a single page. As a parent picker over a tree of
+    // any depth, the set that must not be offered is the whole subtree of the
+    // page being moved: offering a descendant would put a destination in the
+    // menu that the server can only refuse after the round trip. A bare string
+    // still works, so [[link]] autocomplete's single-id call needs no change.
+    const exclude = [].concat(req.query.exclude || []).filter(Boolean);
+    if (exclude.length) conds.push(`p.id <> ALL(${bind(exclude)}::uuid[])`);
 
     // A parent page has to live in the same space as its child, so the parent
     // picker asks for a hard filter where the [[link]] picker only wants the
     // current space floated to the top.
     let preferSpace = '';
+    let onlySpace = false;
     if (req.query.spaceId) {
       const spaceParam = bind(req.query.spaceId);
-      if (req.query.onlySpace) conds.push(`p.space_id = ${spaceParam}`);
-      else preferSpace = `(p.space_id = ${spaceParam}) DESC, `;
+      if (req.query.onlySpace) {
+        conds.push(`p.space_id = ${spaceParam}`);
+        onlySpace = true;
+      } else preferSpace = `(p.space_id = ${spaceParam}) DESC, `;
     }
+
+    // Recency is the right ranking for [[link]] autocomplete — you link to what
+    // you were just working on. It is the wrong one for a parent picker over a
+    // deep tree, where the twelve most recently touched pages are an arbitrary
+    // slice of the hierarchy the user is trying to navigate. Sort those by
+    // title, which at least reads as a list you can scan.
+    const order = onlySpace ? 'p.title, p.updated_at DESC' : `${preferSpace}p.updated_at DESC`;
 
     const { rows } = await q(
       `SELECT p.id, p.title, p.icon, p.space_id,
               s.slug AS space_slug, s.name AS space_name, s.icon AS space_icon
        FROM pages p JOIN spaces s ON s.id = p.space_id
        WHERE ${conds.join(' AND ')}
-       ORDER BY ${preferSpace}p.updated_at DESC
+       ORDER BY ${order}
        LIMIT 12`,
       params
     );
@@ -199,7 +213,9 @@ router.post(
     if (parentId) {
       const parent = await getPage(parentId);
       if (parent.space_id !== spaceId) throw httpError(400, 'Parent page is in a different space');
-      assertCanTakeChildren(parent);
+      // A page being created has nothing under it yet, so only the parent's own
+      // level is in question.
+      assertDepthFits(await pageLevel(parentId));
     }
     // Importing writes the body here rather than PATCHing it a moment later, so
     // the page is never observable — by the editor, by search, by another
@@ -691,14 +707,15 @@ router.post(
       if (parent[0].space_id !== targetSpaceId) {
         throw httpError(400, 'Parent page is in a different space');
       }
-      assertCanTakeChildren(parent[0]);
-      // One level deep, for the batch as well as for one page: nothing carrying
-      // subpages of its own can become a subpage.
-      const { rows: withKids } = await q(
-        'SELECT 1 FROM pages WHERE parent_id = ANY($1::uuid[]) AND deleted_at IS NULL LIMIT 1',
-        [pageIds]
-      );
-      if (withKids.length) throw httpError(400, 'A page with subpages cannot itself become a subpage');
+      // Depth, for the batch as a whole rather than page by page. The pages all
+      // land under the same parent, so the one that decides whether the batch
+      // fits is whichever is carrying the tallest subtree. Checking it here as
+      // well as inside each `movePage` is the point of a batch endpoint: the
+      // fourth page of four refused halfway through would leave the tree in a
+      // state nobody asked for.
+      const level = await pageLevel(parentId);
+      const heights = await Promise.all(pageIds.map((id) => subtreeHeight(id)));
+      assertDepthFits(level, Math.max(...heights));
     }
 
     // Siblings as the destination will look with the whole selection lifted out
@@ -834,15 +851,11 @@ router.post(
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id, { withDeleted: true });
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    // Restore to root if the old parent is itself deleted.
-    let parentId = page.parent_id;
-    if (parentId) {
-      const { rows } = await q('SELECT deleted_at FROM pages WHERE id = $1', [parentId]);
-      if (!rows[0] || rows[0].deleted_at) parentId = null;
+    const restored = await restorePage(page);
+    for (const row of restored) {
+      if (row.embedding_status !== 'ready') notePageChanged(row.id, row.updated_at);
     }
-    await q('UPDATE pages SET deleted_at = NULL, parent_id = $2 WHERE id = $1', [page.id, parentId]);
-    if (page.embedding_status !== 'ready') notePageChanged(page.id, page.updated_at);
-    res.json({ ok: true });
+    res.json({ ok: true, restored: restored.length });
   })
 );
 

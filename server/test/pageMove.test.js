@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { siblingOrderKey, siblingOrderKeys, rewriteLinkSlugs } from '../src/lib/pageMove.js';
 import { isOrderKey } from '../src/lib/orderKey.js';
+import { MAX_PAGE_DEPTH, assertDepthFits } from '../src/lib/pageDepth.js';
 
 const siblings = (...keys) => keys.map((order_key, i) => ({ id: `p${i}`, order_key }));
 
@@ -179,4 +180,50 @@ test('several links in one document are all repaired in a single pass', () => {
   assert.equal(node.content[0].content[0].attrs.spaceSlug, 'new');
   assert.equal(node.content[1].content[0].attrs.spaceSlug, 'new');
   assert.equal(node.content[1].content[1].attrs.spaceSlug, 'keep');
+});
+
+// ---- how deep a page may go ----
+//
+// The tree was capped at one level of subpages until issue #24; `assertDepthFits`
+// is what replaced that cap. It is arithmetic over two numbers the caller has
+// already measured — the destination parent's level, and how far the branch being
+// moved reaches below its own root — so it is worth testing here rather than only
+// through a database. The off-by-one that matters is at the boundary: a page
+// landing *exactly* at MAX_PAGE_DEPTH is legal, one past it is not.
+
+const fits = (parentLevel, height = 0) => {
+  try {
+    assertDepthFits(parentLevel, height);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test('a new root page fits — the root has no parent, so parentLevel is 0', () => {
+  assert.ok(fits(0));
+});
+
+test('a page landing exactly at the limit is allowed', () => {
+  assert.ok(fits(MAX_PAGE_DEPTH - 1));
+});
+
+test('a page one level past the limit is refused', () => {
+  assert.ok(!fits(MAX_PAGE_DEPTH));
+});
+
+test('the branch being moved counts, not just the page being moved', () => {
+  // A leaf fits under a parent two from the bottom; the same page carrying two
+  // levels of its own does not. This is the case the old "a page with subpages
+  // cannot itself become a subpage" rule stood in for.
+  assert.ok(fits(MAX_PAGE_DEPTH - 2, 0));
+  assert.ok(fits(MAX_PAGE_DEPTH - 2, 1));
+  assert.ok(!fits(MAX_PAGE_DEPTH - 2, 2));
+});
+
+test('the refusal names the limit so the client can show it as-is', () => {
+  assert.throws(() => assertDepthFits(MAX_PAGE_DEPTH), {
+    status: 400,
+    message: `Pages can only be nested ${MAX_PAGE_DEPTH} levels deep`,
+  });
 });
