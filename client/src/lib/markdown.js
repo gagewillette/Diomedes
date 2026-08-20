@@ -11,6 +11,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
 import { BlockId } from '../editor/blockId.js';
 import { hydrateDiagramBlocks } from './diagramBlocks.js';
+import { lowerForMarkdown, unescapeCalloutBadges } from './exportDoc.js';
 
 // Parse a markdown string into TipTap JSON using a throwaway headless editor.
 export function markdownToJSON(md) {
@@ -37,6 +38,32 @@ export function markdownToJSON(md) {
   // blocks. The server normalises that on write, but the imported document is
   // also shown before it round-trips, so convert here too and let the two agree.
   return hydrateDiagramBlocks(json);
+}
+
+// Serialise TipTap JSON back to markdown — the mirror of markdownToJSON, built
+// from the same extension list so a page that came in as a markdown import goes
+// back out as the markdown it came from.
+//
+// The editor here has no DOM to draw into and no React, which is why the
+// document is lowered first: diagrams, callouts, toggles and page links become
+// blocks this extension list actually knows, instead of being dropped on the
+// floor. See exportDoc.js.
+export function jsonToMarkdown(json) {
+  const editor = new Editor({
+    element: document.createElement('div'),
+    extensions: [
+      StarterKit,
+      Link,
+      Image,
+      Table, TableRow, TableCell, TableHeader,
+      TaskList, TaskItem,
+      Markdown.configure({ html: false }),
+    ],
+    content: lowerForMarkdown(json),
+  });
+  const md = editor.storage.markdown.getMarkdown();
+  editor.destroy();
+  return unescapeCalloutBadges(md);
 }
 
 export function downloadFile(filename, content, mime = 'text/plain') {
