@@ -224,13 +224,31 @@
 /* callout */
 .gd-callout {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   border-radius: 8px;
   padding: 10px 12px;
   margin: 6px 0;
 }
+/* The icon box is exactly one line box tall and centres the emoji in it, so the
+   icon sits on the first line of the text rather than towering over it. The
+   button itself is a couple of pixels taller than the line; letting it overflow
+   keeps the two glyphs aligned instead of the line growing around the button. */
+.gd-callout-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--gd-line-height, 1.65) * 1em);
+}
 .gd-callout-body { flex: 1; min-width: 0; }
-.gd-callout-body > p:first-child { margin-top: 0; }
+/* Descendant, not child: NodeViewContent puts its own wrappers between this
+   element and the paragraph, so `> p:first-child` never matched. The paragraph
+   kept its 1em margins, and a flex item is its own block formatting context —
+   nothing collapses out — so typing started a full line below the icon beside
+   it. Same bug, same fix as .gd-footnote-body below. */
+.gd-callout-body :first-child { margin-top: 0; }
+.gd-callout-body :last-child { margin-bottom: 0; }
 .gd-callout-info    { background: rgba(51, 154, 240, 0.10); border: 1px solid rgba(51,154,240,.25); }
 .gd-callout-success { background: rgba(47, 158, 68, 0.10);  border: 1px solid rgba(47,158,68,.25); }
 .gd-callout-warning { background: rgba(240, 140, 0, 0.12);  border: 1px solid rgba(240,140,0,.3); }
@@ -265,6 +283,12 @@
 }
 .gd-mermaid:hover, .gd-excalidraw:hover { border-color: var(--mantine-color-default-border); }
 .gd-mermaid.is-selected, .gd-excalidraw.is-selected { border-color: var(--mantine-color-blue-5); }
+/* A selected diagram is a block on the clipboard, not just a hovered one — the
+   tint says so plainly enough that copy/paste is a gesture people find. */
+.gd-mermaid.is-selected, .gd-excalidraw.is-selected, .gd-drawio.is-selected {
+  box-shadow: 0 0 0 2px var(--mantine-color-blue-5);
+  background: var(--mantine-color-blue-light);
+}
 .gd-mermaid-preview { display: flex; justify-content: center; cursor: default; }
 .gd-mermaid-preview svg { max-width: 100%; }
 .gd-node-edit-btn {
