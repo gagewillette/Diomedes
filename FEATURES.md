@@ -23,6 +23,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Excalidraw diagrams | ✅ Full Excalidraw editor in a modal, scene stored in the doc |
 | Draw.io diagrams | ✅ Full diagrams.net editor in a modal (embed.diagrams.net postMessage integration); XML + SVG preview stored in the doc |
 | Images / video / file attachments | ✅ Upload to server-local storage, drag-drop and paste images |
+| PDF / PowerPoint documents | ✅ `/document` or drag-drop inserts a document bar. PDFs open in the browser's native viewer in a new tab; a PPTX is stored as-is (download only) or converted to PDF server-side on upload. Stored under a per-user directory |
 | Embeds (YouTube, iframe → Airtable/Loom/Miro/Figma/etc.) | ✅ YouTube node + generic iframe embed node (paste any embed URL) |
 | @-mention users | ✅ |
 | @-mention pages | ➖ Use normal links to pages |
