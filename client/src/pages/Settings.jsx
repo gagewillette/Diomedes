@@ -10,12 +10,14 @@ import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 import {
   FONT_LABELS, FONT_STACKS, KEYMAP_LABELS, VIM_CHALLENGE, isVimQuitAnswer,
 } from '../lib/prefs.js';
 
 export default function Settings() {
   const { user, refresh, preferences, updatePreferences } = useAuth();
+  useDocumentIdentity('Settings', '⚙️');
   const [name, setName] = useState(user.name);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActionIcon, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { IconMaximize, IconX, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
+import { createPressTracker } from './diagramPress.js';
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 16;
@@ -268,6 +269,11 @@ export function DiagramLightboxHost() {
  * the same picture appears twice" has no answer. Enlarging stays one click
  * away on the magnifier button, and double-click still opens the editor.
  *
+ * Presses are counted here rather than read off `MouseEvent.detail`. That
+ * counter belongs to the window and keeps counting across a focus change, so
+ * the click that brings the page back could arrive as click number two and
+ * open the editor — see diagramPress.js.
+ *
  * Everything hangs off mousedown, in the capture phase: pressing on a diagram
  * makes ProseMirror select the node and rebuild its DOM, so by the time a
  * bubbled mousedown (let alone the click that would follow) reaches React, the
@@ -279,6 +285,27 @@ export function DiagramLightboxHost() {
  * also suppress the drag that `draggable: true` node views start from it.
  */
 let clickTimer = null;
+const presses = createPressTracker();
+
+// Leaving the page ends whatever was in flight: the zoom a press had just asked
+// for (nobody wants to come back to a full-screen diagram they left behind) and
+// the press itself, so the click that brings the page back cannot pair with the
+// one before it. Focus moving into a frame of this page — the draw.io editor,
+// the offscreen renderer — is not the page losing focus, which is what
+// `document.hasFocus()` distinguishes.
+function endPressesInFlight() {
+  clearTimeout(clickTimer);
+  presses.focusLost();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('blur', () => {
+    if (!document.hasFocus()) endPressesInFlight();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') endPressesInFlight();
+  });
+}
 
 export function useZoomClickHandlers({ editable, onZoom, onEdit, onSelect }) {
   // The delay only exists to let a double-click beat the single click that
@@ -292,8 +319,11 @@ export function useZoomClickHandlers({ editable, onZoom, onEdit, onSelect }) {
     style: { cursor: editable ? 'pointer' : 'zoom-in' },
     onMouseDownCapture: (e) => {
       if (e.button !== 0) return;
-      if (e.detail > 1) {
-        clearTimeout(clickTimer);
+      const kind = presses.press({ x: e.clientX, y: e.clientY, time: e.timeStamp });
+      // A press that only brought the page back to the front asked for nothing.
+      if (kind === 'refocus') return;
+      if (kind === 'double') {
+        clearTimeout(clickTimer); // whatever the first press asked for
         if (editable) onEdit?.();
         else onZoom?.();
         return;

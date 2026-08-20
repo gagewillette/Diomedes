@@ -658,12 +658,27 @@ body.gd-block-drag-active {
 }
 .gd-pagelink:hover { background: var(--mantine-color-blue-light-hover); }
 /* A link written against a title that has no page yet — still readable, but
-   visibly waiting to be filled in. */
-.gd-pagelink.is-unresolved {
+   visibly waiting to be filled in. The selector carries the editor's anchor
+   colour rule (`.gd-editor a:not(...)`, which is one specificity point heavier
+   than a bare `.gd-pagelink.is-unresolved`) or these chips render blue and look
+   resolved when they are not. */
+.gd-pagelink.is-unresolved,
+.gd-editor a.gd-pagelink.is-unresolved {
   background: transparent;
   color: var(--mantine-color-dimmed);
   border: 1px dashed var(--mantine-color-default-border);
   cursor: default;
+  font-weight: 500;
+}
+/* An unresolved link someone may fix: clicking it opens the page picker, so it
+   has to look like something you can click. */
+.gd-pagelink.is-unresolved.is-fixable,
+.gd-editor a.gd-pagelink.is-unresolved.is-fixable { cursor: pointer; }
+.gd-pagelink.is-unresolved.is-fixable:hover,
+.gd-editor a.gd-pagelink.is-unresolved.is-fixable:hover {
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-text);
+  border-style: solid;
 }
 .ProseMirror-selectednode .gd-pagelink,
 .gd-pagelink-wrap.ProseMirror-selectednode .gd-pagelink {
@@ -804,6 +819,14 @@ body.gd-block-drag-active {
   background: var(--mantine-color-blue-filled);
   color: var(--mantine-color-white);
   border-radius: 1px;
+}
+/* An empty line has no character to sit on, so the block is given a width of
+   its own — otherwise the cursor would be invisible there. */
+.gd-vim-block-cursor-empty {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  vertical-align: text-bottom;
 }
 .gd-editor.gd-vim-normal,
 .gd-editor.gd-vim-visual,

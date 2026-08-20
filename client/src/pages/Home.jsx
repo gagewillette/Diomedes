@@ -7,6 +7,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { pickGreeting, timeBucket } from '../lib/greetings.js';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 import Emoji from '../components/Emoji.jsx';
 
 dayjs.extend(relativeTime);
@@ -31,6 +32,9 @@ export default function Home() {
   const { user, workspaceName } = useAuth();
   const navigate = useNavigate();
   const [greeting, setGreeting] = useState(() => pickGreeting(user.name));
+
+  // Nothing in particular is open here, so the tab names the workspace.
+  useDocumentIdentity(workspaceName);
 
   // Re-roll on a fresh visit, and again whenever the clock crosses into a new
   // part of the day so a long-lived tab never greets you with the wrong one.

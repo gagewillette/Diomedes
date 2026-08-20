@@ -215,7 +215,7 @@ export default function Layout({ children }) {
             </Tooltip>
           )}
         </Group>
-        <AppShell.Section grow component={ScrollArea} mt={4}>
+        <AppShell.Section grow component={ScrollArea} type="never" mt={4}>
           {spaces.map((space) => {
             const open = openSpaces.has(space.id);
             return (

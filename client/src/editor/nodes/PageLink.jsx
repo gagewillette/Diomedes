@@ -8,6 +8,7 @@ import { api, emitNavigate, emitPagesChanged } from '../../lib/api.js';
 import { makeSuggestionRender } from '../suggestionRender.js';
 import { subscribeTitle, getCachedTitle } from './pageTitles.js';
 import { subscribeLabel, getCachedLabel } from './pageLabels.js';
+import PagePicker from '../../components/PagePicker.jsx';
 
 // Where the editor currently is. Set by Editor.jsx before rendering, so the
 // suggestion plugin — which lives outside React — knows which space to search
@@ -69,6 +70,7 @@ function useLabelResolution(label) {
 
 function PageLinkView({ node, updateAttributes, editor }) {
   const { pageId, label, spaceSlug } = node.attrs;
+  const [picking, setPicking] = useState(false);
   // `undefined` = not looked up yet (show the written label), `null` = the page
   // is gone or unreadable, an object = the page as it is titled right now.
   const [live, setLive] = useState(() => (pageId ? getCachedTitle(pageId) : null));
@@ -103,29 +105,56 @@ function PageLinkView({ node, updateAttributes, editor }) {
   const text = (target?.title ?? label) || 'Untitled';
   const href = resolved ? pageHref(target?.spaceSlug || spaceSlug, resolvedId) : null;
 
+  // A link written by the MCP server or an import names a title that may never
+  // have had a page — or may have one under a slightly different title. The chip
+  // is the place to fix that: clicking it picks the target by hand and writes
+  // the id into the node, which is the same shape the autocomplete produces, so
+  // it follows renames from then on. Read-only readers just see a dead chip.
+  const fixable = !resolved && Boolean(editor?.isEditable);
+
   const open = (e) => {
     e.preventDefault();
-    if (href) emitNavigate(href);
+    if (href) {
+      emitNavigate(href);
+      return;
+    }
+    if (fixable) setPicking(true);
+  };
+
+  const assign = (page) => {
+    if (!page) return;
+    updateAttributes({ pageId: page.id, label: page.title || label, spaceSlug: page.space_slug });
   };
 
   return (
     <NodeViewWrapper as="span" className="gd-pagelink-wrap">
       <a
         href={href || undefined}
-        className={`gd-pagelink ${resolved ? '' : 'is-unresolved'}`}
+        className={`gd-pagelink ${resolved ? '' : 'is-unresolved'}${fixable ? ' is-fixable' : ''}`}
         onClick={open}
         title={
           resolved
             ? text
             : pageId
               ? `“${label}” is in the trash or not shared with you`
-              : `No page named “${label}” yet`
+              : fixable
+                ? `No page named “${label}” yet — click to link it to a page`
+                : `No page named “${label}” yet`
         }
         data-page-link=""
       >
         {resolved ? <IconFileText size={13} /> : <IconLinkOff size={13} />}
         <span>{text}</span>
       </a>
+      {picking && (
+        <PagePicker
+          opened
+          onClose={() => setPicking(false)}
+          onPick={assign}
+          title={`Link “${label}” to a page`}
+          spaceId={linkContext.spaceId}
+        />
+      )}
     </NodeViewWrapper>
   );
 }
