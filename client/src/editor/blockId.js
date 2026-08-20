@@ -84,12 +84,6 @@ export const BLOCK_ID_TYPES = [
   'iframeEmbed',
   'videoBlock',
   'documentBlock',
-  // The footnote apparatus. The container is a top-level block like any other,
-  // so page_blocks and the delta endpoint can address it; the entries inside it
-  // are stamped for the same reason list items are — so editing one note does
-  // not read as a rewrite of every note.
-  'footnotes',
-  'footnote',
 ];
 
 const blockIdPluginKey = new PluginKey('blockId');

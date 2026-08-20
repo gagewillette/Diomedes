@@ -5,7 +5,7 @@ import {
   IconLetterT, IconH1, IconH2, IconH3, IconList, IconListNumbers, IconListCheck,
   IconChevronRight, IconQuote, IconCode, IconTable, IconMinus, IconInfoCircle,
   IconPhoto, IconMovie, IconPaperclip, IconChartDots3, IconPencil, IconMathFunction,
-  IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3, IconFileTypePdf, IconSuperscript,
+  IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3, IconFileTypePdf,
 } from '@tabler/icons-react';
 import { makeSuggestionRender } from './suggestionRender.js';
 
@@ -79,9 +79,6 @@ export function buildSlashItems({ uploadFile, uploadDocument }) {
           e.chain().focus().deleteRange(r).insertContent({ type: 'iframeEmbed', attrs: { src: url } }).run();
         else e.chain().focus().deleteRange(r).run();
       } },
-    { title: 'Footnote', desc: 'Numbered note at the bottom of the page', icon: IconSuperscript,
-      kw: 'footnote note citation reference source aside endnote',
-      run: (e, r) => e.chain().focus().deleteRange(r).addFootnote().run() },
     { title: 'Date', desc: "Insert today's date", icon: IconCalendar, kw: 'today now',
       run: (e, r) => e.chain().focus().deleteRange(r)
         .insertContent(new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }))

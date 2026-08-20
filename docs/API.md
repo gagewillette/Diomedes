@@ -75,20 +75,7 @@ Every response carries a `Server-Timing: app;dur=<ms>` header, which the browser
 ### Pages
 Page `content` is TipTap/ProseMirror JSON (`{"type":"doc","content":[...]}`).
 Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagram{code}`,
-`excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`,
-`footnoteRef{footnoteId}`, `footnote{footnoteId}`, `footnotes`.
-
-Footnotes are three nodes rather than one: an inline `footnoteRef` atom sits in
-the prose, a `footnote` block holds the note's content (`block+`, so a note may
-be several paragraphs), and a single `footnotes` container collects them. The
-container is constrained by the document schema (`block+ footnotes?`) to appear
-at most once, as the last child of the document — an API client that writes one
-anywhere else will have it rejected.
-
-The two halves are joined by `footnoteId`. **The displayed number is not
-stored**: it is derived from the order the references appear in, so a client
-writing footnotes never has to number them and never has to renumber them.
-Write the pairs, in any order, and leave the numbering alone.
+`excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`.
 
 A `drawioDiagram` needs only its `xml` (an mxGraph `<mxfile>`/`<mxGraphModel>`
 document) — the `svg` preview is optional. An API client that writes a diagram

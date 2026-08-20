@@ -22,10 +22,6 @@ export const estimateTokens = (text) => Math.ceil((text || '').trim().length / 4
 export function docBlocks(doc) {
   const blocks = [];
   for (const node of Array.isArray(doc?.content) ? doc.content : []) {
-    if (node.type === 'footnotes') {
-      blocks.push(...footnoteBlocks(node));
-      continue;
-    }
     const text = extractText(node).trim();
     if (!text) continue;
     blocks.push({
@@ -35,36 +31,6 @@ export function docBlocks(doc) {
     });
   }
   return blocks;
-}
-
-/**
- * The footnote apparatus, flattened to one block per note.
- *
- * Left whole it would be a single block holding every note on the page, so a
- * semantic hit anywhere in it would point at "the footnotes" rather than at the
- * note that actually matched — and on a page with forty citations that block
- * would blow straight past the chunk cap and be split on sentence boundaries
- * that fall in the middle of unrelated notes.
- *
- * The synthetic heading resets the heading trail, so a chunk built from a note
- * is prefixed `Page title > Footnotes` instead of inheriting whichever section
- * happened to be last on the page.
- *
- * Every block here is attributed to the *container's* id, not to the note's.
- * That is deliberate: `splitBlocks` projects top-level nodes, so an edit to any
- * note reports the container as the block that changed, and a chunk claiming a
- * finer id than the writer ever reports would never be re-embedded.
- */
-function footnoteBlocks(node) {
-  const blockId = node.attrs?.blockId || null;
-  const notes = (Array.isArray(node.content) ? node.content : [])
-    .map((note) => extractText(note).trim())
-    .filter(Boolean);
-  if (!notes.length) return [];
-  return [
-    { text: 'Footnotes', level: 1, blockId },
-    ...notes.map((text) => ({ text, level: 0, blockId })),
-  ];
 }
 
 // Last ~n tokens of text, cut at a word boundary.
