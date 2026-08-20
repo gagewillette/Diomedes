@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Group, Text, ActionIcon, Menu, UnstyledButton } from '@mantine/core';
+import {
+  Group, Text, ActionIcon, Menu, UnstyledButton, Modal, TextInput, Button, Stack,
+} from '@mantine/core';
 import {
   IconChevronRight, IconDots, IconPlus, IconTrash, IconArrowUp, IconArrowDown,
   IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText, IconSitemap,
+  IconFileImport,
 } from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { api, emitPagesChanged, onPagesChanged } from '../lib/api.js';
 import PagePicker from './PagePicker.jsx';
+import { markdownToJSON } from '../lib/markdown.js';
 import { dragState, dropIntent } from '../lib/pageDrag.js';
 
 // How long a collapsed page has to be hovered before it opens to accept a drop
 // inside it. Long enough that dragging *past* a page never disturbs the tree,
 // short enough that aiming for a grandchild is not a chore.
 const HOVER_EXPAND_MS = 550;
+
+// Pull a leading `# Heading` off the markdown so it can seed the page title
+// instead of being duplicated in the body.
+function splitLeadingHeading(md) {
+  const lines = md.split('\n');
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  const m = lines[i]?.match(/^#\s+(.+?)\s*$/);
+  if (!m) return { title: null, body: md };
+  return { title: m[1].trim(), body: lines.slice(i + 1).join('\n') };
+}
 
 export default function PageTree({ space }) {
   const [pages, setPages] = useState([]);
@@ -22,6 +37,11 @@ export default function PageTree({ space }) {
   const [dragging, setDragging] = useState(null); // id of the page this tree is dragging
   const [dropAt, setDropAt] = useState(null); // { id, zone } | { id: null, zone: 'root' }
   const hoverTimer = useRef(null);
+  const [importParent, setImportParent] = useState(null);
+  const [importDoc, setImportDoc] = useState(null); // { body, fallbackTitle }
+  const [importName, setImportName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef(null);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const pathParts = pathname.split('/');
@@ -74,6 +94,48 @@ export default function PageTree({ space }) {
       navigate(`/s/${space.slug}/p/${data.page.id}`);
     } catch (err) {
       notifications.show({ color: 'red', message: err.message });
+    }
+  };
+
+  const pickImportFile = (parentId) => {
+    setImportParent(parentId);
+    importInputRef.current?.click();
+  };
+
+  const readImportFile = async (file) => {
+    try {
+      const text = await file.text();
+      const { title, body } = splitLeadingHeading(text);
+      const fallbackTitle = title || file.name.replace(/\.(md|markdown|txt)$/i, '');
+      setImportDoc({ body, fallbackTitle });
+      setImportName(fallbackTitle);
+    } catch (err) {
+      notifications.show({ color: 'red', message: `${file.name}: ${err.message}` });
+      setImportParent(null);
+    }
+  };
+
+  const closeImport = () => {
+    setImportDoc(null);
+    setImportParent(null);
+    setImportName('');
+  };
+
+  const runImport = async () => {
+    if (!importDoc || importing) return;
+    const title = importName.trim() || importDoc.fallbackTitle || 'Untitled';
+    setImporting(true);
+    try {
+      const d = await api.post('/api/pages', { spaceId: space.id, parentId: importParent, title });
+      await api.patch(`/api/pages/${d.page.id}`, { content: markdownToJSON(importDoc.body), title });
+      emitPagesChanged(space.id);
+      if (importParent) setExpanded((s) => new Set([...s, importParent]));
+      closeImport();
+      navigate(`/s/${space.slug}/p/${d.page.id}`);
+    } catch (err) {
+      notifications.show({ color: 'red', message: err.message });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -304,6 +366,9 @@ export default function PageTree({ space }) {
                   <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
                     New subpage
                   </Menu.Item>
+                  <Menu.Item leftSection={<IconFileImport size={14} />} onClick={() => pickImportFile(page.id)}>
+                    Import markdown file
+                  </Menu.Item>
                   <Menu.Item
                     leftSection={<IconPencil size={14} />}
                     onClick={() => {
@@ -372,6 +437,27 @@ export default function PageTree({ space }) {
   const roots = childrenOf.get('root') || [];
   return (
     <div className="gd-tree">
+      <input
+        ref={importInputRef} type="file" accept=".md,.markdown,.txt" hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) readImportFile(file);
+        }}
+      />
+      <Modal opened={!!importDoc} onClose={closeImport} title="Import markdown file" centered>
+        <Stack gap="md">
+          <TextInput
+            label="Page name" data-autofocus value={importName}
+            onChange={(e) => setImportName(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') runImport(); }}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={closeImport}>Cancel</Button>
+            <Button onClick={runImport} loading={importing}>Import</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <PagePicker
         opened={Boolean(reparenting)}
         onClose={() => setReparenting(null)}
