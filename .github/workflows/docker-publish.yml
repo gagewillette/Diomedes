@@ -49,6 +49,10 @@ jobs:
           # Full history and tags — the bump range is measured from the most
           # recent v* tag, not from the previous push.
           fetch-depth: 0
+          # main requires PRs via ruleset; GITHUB_TOKEN pushes are rejected.
+          # RELEASE_PAT belongs to a repo admin, who is a bypass actor on
+          # that ruleset, so the bump commit + tags can still go straight in.
+          token: ${{ secrets.RELEASE_PAT }}
 
       - uses: actions/setup-node@v4
         with:
