@@ -21,6 +21,7 @@ import { pool } from '../db.js';
 import { httpError } from './util.js';
 import { PAGE_LINK_NODE } from './links.js';
 import { generateNKeysBetween, isOrderKey, keyForSlot } from './orderKey.js';
+import { assertDepthFits, pageLevel, subtreeHeight } from './pageDepth.js';
 
 /**
  * Where to place a page dropped at `index` among `siblings`.
@@ -131,6 +132,24 @@ export async function movePage({ page, parentId, spaceId, index, orderKey: expli
   try {
     await conn.query('BEGIN');
 
+    // Serialise moves within a space before reading anything.
+    //
+    // Locking the moved row alone was enough while the tree was one level deep,
+    // because a cycle needed two pages that could each be the other's parent and
+    // the cap made that unexpressible. At unbounded depth it is an ordinary
+    // race: A is moved under B and B under A at the same moment, each
+    // transaction validates against the tree it read, both commit, and the pair
+    // detaches into a cycle no tree query can reach. An advisory lock keyed on
+    // the space makes the read-validate-write of a move atomic against every
+    // other move in the same space, which is the only scope a cycle can span.
+    //
+    // The cost is nil: page moves are rare and human-driven, and different
+    // spaces never contend. A cross-space move takes both keys in sorted order
+    // so two moves in opposite directions cannot deadlock against each other.
+    for (const key of [...new Set([page.space_id, targetSpaceId])].sort()) {
+      await conn.query('SELECT pg_advisory_xact_lock(hashtext($1::text))', [key]);
+    }
+
     // Lock the row being moved. Two people dragging the same page at once then
     // serialise here rather than racing to write conflicting parents.
     const { rows: locked } = await conn.query(
@@ -169,15 +188,16 @@ export async function movePage({ page, parentId, spaceId, index, orderKey: expli
       if (parent[0].space_id !== targetSpaceId) {
         throw httpError(400, 'Parent page is in a different space');
       }
-      // The tree is one level of subpages deep. Enforced here rather than at the
-      // route so every way of moving a page — the menu, a drag, the API — is
-      // held to it, and so the check reads the same locked rows the move writes.
-      if (parent[0].parent_id) {
-        throw httpError(400, 'Pages can only be nested one level deep');
-      }
-      if (subtreeIds.length > 1) {
-        throw httpError(400, 'A page with subpages cannot itself become a subpage');
-      }
+      // Depth. Enforced here rather than at the route so every way of moving a
+      // page — the menu, a drag, the API — is held to it, and so the check reads
+      // the same locked rows the move writes.
+      //
+      // The subtree travels with the page, so what has to fit under the new
+      // parent is the whole branch, not just the row being updated. This is the
+      // check that replaces "a page with subpages cannot itself become a
+      // subpage": that rule existed only because one level left no room for a
+      // branch, and at twenty levels the question is how tall the branch is.
+      assertDepthFits(await pageLevel(parentId, conn), await subtreeHeight(page.id, conn));
     }
 
     // Siblings as they will be *after* the move, so an in-place reorder measures

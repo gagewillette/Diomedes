@@ -20,6 +20,7 @@ import { markdownToJSON } from '../lib/markdown.js';
 import { exportPageZip } from '../lib/exportZip.js';
 import { dragState, dropIntent, multiDragImage } from '../lib/pageDrag.js';
 import { dragPayload, inTreeOrder, nextSelection, treeOrder, visibleOrder } from './pageSelection.js';
+import { canBeNested, canNest, dropAllowed, rowIndent, subtreeIds, treeDepths } from './pageDepth.js';
 
 // How long a collapsed page has to be hovered before it opens to accept a drop
 // inside it. Long enough that dragging *past* a page never disturbs the tree,
@@ -94,6 +95,14 @@ export default function PageTree({ space }) {
     }
     return map;
   }, [pages]);
+
+  // Where each page sits and how far its own branch reaches, both keyed by id.
+  // `dropAllowed` and the row menu are asked about depth once per row per
+  // render, so the arithmetic is done once for the whole tree instead. The
+  // reasoning behind all of it lives in pageDepth.js.
+  const { depths, heights } = useMemo(() => treeDepths(childrenOf), [childrenOf]);
+  const depthOf = useCallback((page) => depths.get(page.id) ?? 0, [depths]);
+  const heightOf = useCallback((id) => heights.get(id) ?? 0, [heights]);
 
   // The two orders multi-select works in: every page top to bottom, and the
   // rows actually on screen. See pageSelection.js for why they are not one.
@@ -392,10 +401,11 @@ export default function PageTree({ space }) {
       pageIds: ids,
       spaceId: space.id,
       titles,
-      // Whether *anything* in the batch is carrying subpages. One flag rather
-      // than a per-page answer, because the whole batch lands in one place and
-      // so is refused or allowed as one.
-      hasChildren: blockedIds.size > ids.length,
+      // How far the tallest branch in the batch reaches below its own root. One
+      // number rather than a per-page answer, because the whole batch lands in
+      // one place and so is refused or allowed as one. This replaces a
+      // `hasChildren` boolean, which was all the one-level cap needed to know.
+      height: Math.max(0, ...ids.map((id) => heights.get(id) ?? 0)),
       blockedIds,
     };
     setDragging(new Set(ids));
@@ -423,15 +433,9 @@ export default function PageTree({ space }) {
     }, HOVER_EXPAND_MS);
   };
 
-  // The tree is one level of subpages deep, so a drop that would make a third
-  // level is refused here as well as on the server: dropping *into* a page only
-  // works when that page is top level, and a page carrying subpages of its own
-  // can only ever land back at the top level. Refusing during dragover is what
-  // shows the "no drop" cursor rather than letting the drop fail after the fact.
-  const dropAllowed = (page, zone, drag) => {
-    if (zone === 'inside') return !page.parent_id && !drag.hasChildren;
-    return !page.parent_id || !drag.hasChildren;
-  };
+  // Refused here as well as on the server, so a drop that cannot land shows the
+  // "no drop" cursor during dragover instead of failing after the fact.
+  const rowDropAllowed = (page, zone, drag) => dropAllowed(depthOf(page), zone, drag.height);
 
   const onDragOverRow = (page) => (e) => {
     const drag = dragState.current;
@@ -441,7 +445,7 @@ export default function PageTree({ space }) {
     // chain would loop and nothing would ever render it again.
     if (drag.blockedIds.has(page.id)) return;
     const zone = dropIntent(e.currentTarget.getBoundingClientRect(), e.clientY);
-    if (!dropAllowed(page, zone, drag)) {
+    if (!rowDropAllowed(page, zone, drag)) {
       clearHoverTimer();
       setDropAt((prev) => (prev?.id === page.id ? null : prev));
       return;
@@ -466,7 +470,7 @@ export default function PageTree({ space }) {
     const drag = dragState.current;
     if (!drag || !canWrite || drag.blockedIds.has(page.id)) return;
     const zone = dropIntent(e.currentTarget.getBoundingClientRect(), e.clientY);
-    if (!dropAllowed(page, zone, drag)) return;
+    if (!rowDropAllowed(page, zone, drag)) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -534,16 +538,27 @@ export default function PageTree({ space }) {
   // can stagger down the stack instead of every row twitching in unison.
   const dragIndex = useMemo(() => new Map([...dragging].map((id, i) => [id, i])), [dragging]);
 
+  // The parent picker must not offer the page being moved *or* anything beneath
+  // it. With one level of nesting the page itself was the whole answer; at depth
+  // a descendant looks like a perfectly good destination right up until the
+  // server refuses it.
+  const reparentBlocked = useMemo(
+    () => (reparenting ? subtreeIds(childrenOf, reparenting.id) : []),
+    [reparenting, childrenOf]
+  );
+
   const renderNode = (page, depth) => {
     const kids = childrenOf.get(page.id) || [];
     const isOpen = expanded.has(page.id);
     const siblings = childrenOf.get(page.parent_id || 'root') || [];
     const idx = siblings.findIndex((s) => s.id === page.id);
     const byId = new Map(pages.map((p) => [p.id, p]));
-    // Only top-level pages take children, and only a childless page can become
-    // one — the server enforces the same rule.
-    const canNest = !page.parent_id;
-    const canBeNested = !page.parent_id && kids.length === 0;
+    // Both of these used to say "top level only". What limits them now is the
+    // depth cap: a page can take children while there is a level left under it,
+    // and can be nested under its previous sibling while its own branch still
+    // fits one level further down. The server enforces the same arithmetic.
+    const takesChildren = canNest(depth);
+    const nestable = canBeNested(depth, heightOf(page.id));
     const inSelection = selected.length > 1 && selected.includes(page.id);
     const reorder = (index) =>
       act(() => api.post(`/api/pages/${page.id}/move`, { parentId: page.parent_id || null, index }));
@@ -563,7 +578,7 @@ export default function PageTree({ space }) {
             rowDropClass(page.id),
             vim && keyboardFocus && page.id === (cursorId || activePageId) ? 'is-vim-cursor' : '',
           ].filter(Boolean).join(' ')}
-          style={{ paddingLeft: 4 + depth * 14, '--jumble-i': dragIndex.get(page.id) ?? 0 }}
+          style={{ paddingLeft: rowIndent(depth), '--jumble-i': dragIndex.get(page.id) ?? 0 }}
           draggable={canWrite}
           onDragStart={canWrite ? onDragStart(page) : undefined}
           onDragEnd={endDrag}
@@ -613,9 +628,9 @@ export default function PageTree({ space }) {
                 {canWrite && (
                   <>
                     <Menu.Divider />
-                    {/* The tree is one level deep, so a subpage takes no children
-                        of its own — neither created nor imported. */}
-                    {canNest && (
+                    {/* Hidden only at the bottom of the depth limit, where there
+                        is no level left for a subpage to occupy. */}
+                    {takesChildren && (
                       <>
                         <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
                           New subpage
@@ -657,7 +672,7 @@ export default function PageTree({ space }) {
                       Move down
                     </Menu.Item>
                     <Menu.Item
-                      leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0 || !canBeNested}
+                      leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0 || !nestable}
                       onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, { parentId: siblings[idx - 1].id }))}
                     >
                       Nest under previous
@@ -761,10 +776,9 @@ export default function PageTree({ space }) {
         }}
         title={`Set parent of “${reparenting?.title || 'Untitled'}”`}
         spaceId={space.id}
-        exclude={reparenting?.id}
+        exclude={reparentBlocked}
         rootLabel="No parent (top level)"
         onlySpace
-        topLevelOnly
       />
       {/* Trashing several pages at once is the one thing here that cannot be
           undone by dragging them back, so it asks first — and says how many,
