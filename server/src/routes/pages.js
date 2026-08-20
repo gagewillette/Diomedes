@@ -3,6 +3,7 @@ import { q } from '../db.js';
 import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
+import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
 
 const router = Router();
@@ -205,6 +206,53 @@ router.patch(
   })
 );
 
+// ---- realtime collaboration ----
+
+// How long a seed claim is honoured before another client may take it over. A
+// client that wins the claim and then dies (closed tab, lost network) would
+// otherwise leave the page permanently stuck at an empty CRDT document.
+const SEED_LEASE_SEC = 15;
+
+// Converting the stored pages.content JSON into the CRDT has to happen exactly
+// once. If two browsers open a fresh page simultaneously and both convert, both
+// insertions are valid CRDT operations and the document ends up containing the
+// page twice — Yjs has no way to know they meant the same thing. So the claim
+// is arbitrated here, by a single conditional UPDATE: postgres row locking
+// decides the winner and everyone else waits for the sync to arrive.
+//
+// The NOT EXISTS guard closes the other end of it: once any CRDT state has been
+// persisted for the page, seeding can never fire again. Without it, deleting
+// every word on a page would make it look unseeded and resurrect the old text.
+router.post(
+  '/pages/:id/collab/claim-seed',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'writer');
+    const { rows } = await q(
+      `UPDATE pages SET collab_seed_claimed_at = now()
+       WHERE id = $1 AND collab_seeded = false
+         AND NOT EXISTS (SELECT 1 FROM page_ydoc y WHERE y.page_id = pages.id)
+         AND (collab_seed_claimed_at IS NULL
+              OR collab_seed_claimed_at < now() - ($2 || ' seconds')::interval)
+       RETURNING id`,
+      [page.id, SEED_LEASE_SEC]
+    );
+    res.json({ granted: rows.length > 0, content: rows.length > 0 ? page.content : null });
+  })
+);
+
+// Confirmation that the winner actually wrote the content into the CRDT. Only
+// now is the claim retired for good.
+router.post(
+  '/pages/:id/collab/confirm-seed',
+  asyncRoute(async (req, res) => {
+    const page = await getPage(req.params.id);
+    await assertSpaceRole(req.user, page.space_id, 'writer');
+    await q('UPDATE pages SET collab_seeded = true WHERE id = $1', [page.id]);
+    res.json({ ok: true });
+  })
+);
+
 // ---- links & backlinks ----
 
 // Pages that point *at* this one. A link whose target sits in the trash simply
@@ -402,6 +450,16 @@ router.post(
       [page.id, version.title, JSON.stringify(version.content), text, req.user.id]
     );
     notePageChanged(restored[0].id, restored[0].updated_at);
+    // A restore replaces the document wholesale, which the CRDT cannot express
+    // as an edit. Drop the stored doc and the seed flag so the next client
+    // rebuilds it from the restored JSON, and disconnect anyone still holding
+    // the old one.
+    await q('DELETE FROM page_ydoc WHERE page_id = $1', [page.id]);
+    await q(
+      'UPDATE pages SET collab_seeded = false, collab_seed_claimed_at = NULL WHERE id = $1',
+      [page.id]
+    );
+    await getHub()?.resetPage(page.id);
     res.json({ ok: true });
   })
 );

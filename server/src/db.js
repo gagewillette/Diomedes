@@ -164,6 +164,19 @@ export async function migrate() {
   await q(SCHEMA);
   // additive migrations for existing deployments
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'`);
+  // Realtime collaboration: the encoded Yjs document is the live source of
+  // truth while a page is open; pages.content stays as the queryable snapshot.
+  await q(`
+    CREATE TABLE IF NOT EXISTS page_ydoc (
+      page_id uuid PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+      state bytea NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  // collab_seeded records that pages.content has been converted into the CRDT
+  // exactly once; the claim timestamp is the lease that makes that conversion
+  // safe when several clients open a page at the same instant.
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS collab_seeded boolean NOT NULL DEFAULT false`);
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS collab_seed_claimed_at timestamptz`);
   await q(
     `ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding_status text NOT NULL DEFAULT 'disabled'
      CHECK (embedding_status IN ('pending','processing','ready','failed','disabled'))`

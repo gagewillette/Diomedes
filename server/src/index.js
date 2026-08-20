@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'node:http';
 import session from 'express-session';
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
@@ -14,6 +15,7 @@ import spaceRoutes from './routes/spaces.js';
 import pageRoutes from './routes/pages.js';
 import fileRoutes, { STORAGE_PATH } from './routes/files.js';
 import tokenRoutes from './routes/tokens.js';
+import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,22 +38,21 @@ async function main() {
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '30mb' }));
 
-  app.use(
-    session({
-      store: new RedisStore({ client: redis, prefix: 'diomedes:sess:' }),
-      name: 'diomedes.sid',
-      secret: process.env.APP_SECRET,
-      resave: false,
-      saveUninitialized: false,
-      rolling: true,
-      cookie: {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: (process.env.APP_URL || '').startsWith('https') ? 'auto' : false,
-        maxAge: 30 * 24 * 3600 * 1000,
-      },
-    })
-  );
+  const sessionMiddleware = session({
+    store: new RedisStore({ client: redis, prefix: 'diomedes:sess:' }),
+    name: 'diomedes.sid',
+    secret: process.env.APP_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: (process.env.APP_URL || '').startsWith('https') ? 'auto' : false,
+      maxAge: 30 * 24 * 3600 * 1000,
+    },
+  });
+  app.use(sessionMiddleware);
 
   app.get('/api/health', async (_req, res) => res.json({ ok: true, search: await searchHealth() }));
   app.use('/api/auth', authRoutes(redis));
@@ -79,7 +80,9 @@ async function main() {
     res.status(status).json({ error: err.message || 'Server error' });
   });
 
-  app.listen(PORT, () => console.log(`diomedes listening on :${PORT}`));
+  const server = http.createServer(app);
+  await attachCollab(server, { redis, sessionMiddleware });
+  server.listen(PORT, () => console.log(`diomedes listening on :${PORT}`));
 }
 
 main().catch((err) => {

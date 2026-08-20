@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-force-exit test/*.test.js",
     "backfill:embeddings": "node src/search/backfill.js"
   },
   "dependencies": {
@@ -14,8 +14,15 @@
     "connect-redis": "^7.1.1",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
+    "lib0": "^0.2.117",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.13.1",
-    "redis": "^4.7.0"
+    "redis": "^4.7.0",
+    "ws": "^8.21.3",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "y-websocket": "^3.1.0"
   }
 }

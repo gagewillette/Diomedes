@@ -441,3 +441,106 @@
 @media print {
   .gd-backlinks { display: none; }
 }
+
+/* ---- realtime collaboration ---- */
+
+/* Remote text caret. The colour arrives as --gd-peer-color, derived from the
+   peer's user id, so a caret is recognisable before the label is read. */
+.gd-remote-caret {
+  position: relative;
+  display: inline;
+  margin: 0 -1px;
+  pointer-events: none;
+  word-break: normal;
+}
+.gd-remote-caret__flag {
+  position: absolute;
+  top: -0.1em;
+  bottom: -0.15em;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--gd-peer-color);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.gd-remote-caret__label {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  margin-bottom: 1px;
+  padding: 1px 6px;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  user-select: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+/* Not typing: the name moves to their mouse pointer, so the caret goes quiet
+   rather than leaving a permanent badge over the text. */
+.gd-remote-caret.is-idle .gd-remote-caret__flag { opacity: 0.55; }
+.gd-remote-caret.is-idle .gd-remote-caret__label {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.gd-remote-selection { border-radius: 2px; }
+
+/* Miro-style mouse pointers, positioned in document coordinates. */
+.gd-pointer-layer {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 5;
+}
+.gd-pointer {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  /* The peer publishes ~20 positions a second; the transition fills the gaps
+     so the pointer glides instead of stepping. */
+  transition: left 90ms linear, top 90ms linear;
+  will-change: left, top;
+}
+.gd-pointer__arrow {
+  flex: none;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.3));
+}
+.gd-pointer__label {
+  margin-top: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+/* Presence avatars in the page top bar. */
+.gd-presence { margin-right: 8px; }
+.gd-presence__avatar {
+  margin-left: -6px;
+  border: 2px solid var(--mantine-color-body);
+  transition: transform 120ms ease;
+}
+.gd-presence__avatar:first-of-type { margin-left: 0; }
+.gd-presence__avatar.is-typing {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--gd-peer-color);
+}
+.gd-presence-status { margin-right: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gd-pointer { transition: none; }
+  .gd-remote-caret__label { transition: none; }
+}
+
+@media print {
+  .gd-pointer-layer,
+  .gd-remote-caret,
+  .gd-presence { display: none; }
+}
