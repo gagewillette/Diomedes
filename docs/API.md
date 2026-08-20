@@ -76,13 +76,23 @@ Page `content` is TipTap/ProseMirror JSON (`{"type":"doc","content":[...]}`).
 Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagram{code}`,
 `excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`.
 
+Every block-level node carries a `blockId` attribute. Clients that write documents
+are not required to supply one — the server mints ids for any block arriving
+without them and stores them back into the document — but a client that *does*
+send them gets incremental behaviour: only the blocks whose content actually
+changed are rewritten, re-embedded, and reported by the delta endpoint. Sending a
+document with ids stripped makes every block look new. See
+[docs/block-storage.md](block-storage.md).
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/spaces/:id/pages` | Tree metadata (id, parent_id, title, icon, position) |
+| GET | `/api/spaces/:id/pages` | Tree metadata (id, parent_id, title, icon, order_key, rev), ordered by `order_key` |
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
-| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning + search reindex |
-| POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, position?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `position` is the older explicit sort key. |
+| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex |
+| GET | `/api/pages/:id/blocks` | `{rev, blocks[]}` — the page's blocks in document order |
+| GET | `/api/pages/:id/delta?since=N` | What changed since revision `N`: `{rev, full, blocks[], deleted[], order[]}`. `full: true` means the gap is too wide to answer incrementally — refetch the page. |
+| POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, orderKey?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `orderKey` is an explicit sort key for clients that compute one. A numeric `position` is still accepted and read as a slot index. |
 | DELETE | `/api/pages/:id` | Soft-delete subtree (trash) |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |
