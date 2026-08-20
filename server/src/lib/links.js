@@ -78,6 +78,50 @@ async function resolveTarget({ pageId, label }, spaceId) {
   return { targetId: rows[0]?.id || null, byId: false };
 }
 
+// ---- exact title resolution, for machines ----
+//
+// `link-search` is an autocomplete: a substring match, ranked by recency and
+// cut off at twelve rows. That is right for a human picking from a menu and
+// wrong for anything resolving `[[a title]]` to a page, because the exact match
+// being looked for can sit outside that window while unrelated substring hits
+// fill it. Bulk imports over the MCP hit exactly that (issue #66). The two
+// helpers below back `POST /api/pages/resolve-titles`, which answers the
+// question a machine is actually asking: which page *is* titled this?
+
+// Which of the pages sharing a normalized title a link should point at.
+// A page in the space the link was written in wins outright — that is what
+// `[[Overview]]` means when you are inside a space that has one. Failing that a
+// single match anywhere the caller can read resolves, and a genuine tie is
+// reported as a tie rather than decided by an arbitrary ordering.
+export function pickTitleMatch(candidates, preferSpaceId) {
+  if (!candidates?.length) return { status: 'not_found' };
+  const preferred = preferSpaceId ? candidates.filter((p) => p.space_id === preferSpaceId) : [];
+  const pool = preferred.length ? preferred : candidates;
+  if (pool.length > 1) return { status: 'ambiguous', candidates: pool };
+  return { status: 'ok', page: pool[0] };
+}
+
+// The lookup itself: one round trip for a whole document's worth of links,
+// matched on the same normalization `resolveTarget` and `page_links` use.
+// Returns normalized title -> candidate pages, oldest first.
+export async function lookupTitles(titles, acc) {
+  const keys = [...new Set(titles.map(normalizeTitle).filter(Boolean))];
+  const byKey = new Map(keys.map((k) => [k, []]));
+  if (!keys.length) return byKey;
+  const { rows } = await q(
+    `SELECT p.id, p.title, p.icon, p.space_id, s.slug AS space_slug, s.name AS space_name,
+            lower(regexp_replace(btrim(p.title), '\\s+', ' ', 'g')) AS norm
+     FROM pages p JOIN spaces s ON s.id = p.space_id
+     WHERE p.deleted_at IS NULL
+       AND p.space_id IN (${acc.sql})
+       AND lower(regexp_replace(btrim(p.title), '\\s+', ' ', 'g')) = ANY($${acc.params.length + 1}::text[])
+     ORDER BY p.created_at, p.id`,
+    [...acc.params, keys]
+  );
+  for (const row of rows) byKey.get(row.norm)?.push(row);
+  return byKey;
+}
+
 // Adopt dangling links that were written against this page's title. Called
 // after a page is created or renamed so `[[Roadmap]]` typed last week starts
 // resolving the moment someone actually writes the Roadmap page.
