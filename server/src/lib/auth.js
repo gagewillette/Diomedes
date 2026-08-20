@@ -4,6 +4,11 @@ import { httpError, asyncRoute } from './util.js';
 
 const SPACE_RANK = { reader: 1, writer: 2, admin: 3 };
 
+// Roles a space can hand out to everyone. Deliberately no 'admin': space
+// administration stays with named members and workspace admins.
+export const PUBLIC_ROLES = ['reader', 'writer'];
+export const SPACE_ROLES = ['reader', 'writer', 'admin'];
+
 export const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 // Resolve the calling user from a Bearer API token or the session cookie.
@@ -54,21 +59,37 @@ export const requireAdmin = (req, _res, next) => {
 
 export const isWorkspaceAdmin = (user) => ['owner', 'admin'].includes(user.role);
 
-// Subquery (with $1-based params) yielding the space ids the user can read.
+// Subquery (with $1-based params) yielding the space ids the user can read:
+// the spaces they are a member of, plus every space with public access on.
 export const accessibleSpacesQuery = (user) =>
   isWorkspaceAdmin(user)
     ? { sql: 'SELECT id FROM spaces', params: [] }
-    : { sql: 'SELECT space_id AS id FROM space_members WHERE user_id = $1', params: [user.id] };
+    : {
+        sql: `SELECT space_id AS id FROM space_members WHERE user_id = $1
+              UNION
+              SELECT id FROM spaces WHERE public_role IS NOT NULL`,
+        params: [user.id],
+      };
+
+// The whole precedence rule in one place: an explicit membership row always
+// wins over the space's public role — it can raise access above the public
+// level or hold a user below it. No row at all falls back to the public role,
+// and a private space (public_role null) stays members-only.
+export const resolveSpaceRole = ({ memberRole, publicRole }) => memberRole || publicRole || null;
 
 // Resolve the caller's effective role in a space: workspace owners/admins get
-// space admin everywhere; everyone else needs an explicit membership row.
+// space admin everywhere; everyone else gets their membership role, falling
+// back to whatever the space grants the public.
 export async function spaceRole(user, spaceId) {
   if (isWorkspaceAdmin(user)) return 'admin';
-  const { rows } = await q('SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2', [
-    spaceId,
-    user.id,
-  ]);
-  return rows[0]?.role || null;
+  const { rows } = await q(
+    `SELECT s.public_role, m.role AS member_role
+     FROM spaces s LEFT JOIN space_members m ON m.space_id = s.id AND m.user_id = $2
+     WHERE s.id = $1`,
+    [spaceId, user.id]
+  );
+  if (!rows[0]) return null;
+  return resolveSpaceRole({ memberRole: rows[0].member_role, publicRole: rows[0].public_role });
 }
 
 export async function assertSpaceRole(user, spaceId, minRole) {

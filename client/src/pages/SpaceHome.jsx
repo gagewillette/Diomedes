@@ -144,7 +144,7 @@ export default function SpaceHome() {
         )}
       </Stack>
 
-      <MembersModal space={space} opened={membersOpen} onClose={membersHandlers.close} />
+      <MembersModal space={space} opened={membersOpen} onClose={membersHandlers.close} onChanged={load} />
       <SpaceInfoModal
         space={space} opened={infoOpen} onClose={infoHandlers.close}
         onOpenTrash={canWrite ? () => { infoHandlers.close(); trashHandlers.open(); } : null}
@@ -361,11 +361,27 @@ function LegendDot({ color, label }) {
   );
 }
 
-function MembersModal({ space, opened, onClose }) {
+const SPACE_ROLE_OPTIONS = [
+  { value: 'reader', label: 'Can view' },
+  { value: 'writer', label: 'Can edit' },
+  { value: 'admin', label: 'Full access' },
+];
+
+// '' is the "off" value: Mantine selects cannot hold null cleanly.
+const PUBLIC_ROLE_OPTIONS = [
+  { value: '', label: 'No access — members only' },
+  { value: 'reader', label: 'Everyone can view' },
+  { value: 'writer', label: 'Everyone can edit' },
+];
+
+function MembersModal({ space, opened, onClose, onChanged }) {
   const [members, setMembers] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [addUser, setAddUser] = useState(null);
   const [addRole, setAddRole] = useState('reader');
+  const [publicRole, setPublicRole] = useState(space.public_role || '');
+
+  useEffect(() => { setPublicRole(space.public_role || ''); }, [space.public_role, opened]);
 
   const load = useCallback(async () => {
     const d = await api.get(`/api/spaces/${space.id}/members`);
@@ -390,6 +406,32 @@ function MembersModal({ space, opened, onClose }) {
 
   return (
     <Modal opened={opened} onClose={onClose} title={`Members of ${space.name}`} size="lg">
+      <Paper withBorder p="sm" mb="md">
+        <Select
+          label="Public access"
+          description="What every signed-in user gets in this space by default."
+          w={280}
+          allowDeselect={false}
+          data={PUBLIC_ROLE_OPTIONS}
+          value={publicRole}
+          onChange={async (value) => {
+            const previous = publicRole;
+            setPublicRole(value);
+            try {
+              await api.patch(`/api/spaces/${space.id}`, { publicRole: value || null });
+              onChanged?.();
+            } catch (err) {
+              setPublicRole(previous);
+              notifications.show({ color: 'red', message: err.message });
+            }
+          }}
+        />
+        <Text size="xs" c="dimmed" mt={6}>
+          People listed below keep the role you give them, which overrides public access — you can
+          give someone edit rights in a view-only space, or hold them to view-only in one everyone
+          can edit.
+        </Text>
+      </Paper>
       <Group mb="md" align="flex-end">
         <Select
           label="Add user" placeholder="Pick a user" searchable style={{ flex: 1 }}
@@ -398,11 +440,7 @@ function MembersModal({ space, opened, onClose }) {
         />
         <Select
           label="Role" w={130}
-          data={[
-            { value: 'reader', label: 'Can view' },
-            { value: 'writer', label: 'Can edit' },
-            { value: 'admin', label: 'Full access' },
-          ]}
+          data={SPACE_ROLE_OPTIONS}
           value={addRole} onChange={setAddRole}
         />
         <Button
@@ -427,11 +465,7 @@ function MembersModal({ space, opened, onClose }) {
               <Table.Td>
                 <Select
                   size="xs" w={130}
-                  data={[
-                    { value: 'reader', label: 'Can view' },
-                    { value: 'writer', label: 'Can edit' },
-                    { value: 'admin', label: 'Full access' },
-                  ]}
+                  data={SPACE_ROLE_OPTIONS}
                   value={m.role}
                   onChange={async (role) => {
                     await api.patch(`/api/spaces/${space.id}/members/${m.user_id}`, { role });
