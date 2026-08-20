@@ -67,7 +67,9 @@
 .gd-editor h2 { font-size: 1.5em; margin-top: 1em; font-weight: 700; }
 .gd-editor h3 { font-size: 1.25em; margin-top: 0.9em; font-weight: 700; }
 .gd-editor h4 { font-size: 1.1em; font-weight: 700; }
-.gd-editor a { color: var(--mantine-color-blue-6); }
+/* Link color is for prose links only — buttons rendered as anchors (the
+   document card download button) keep their own Mantine color. */
+.gd-editor a:not(.mantine-ActionIcon-root) { color: var(--mantine-color-blue-6); }
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
