@@ -5,6 +5,7 @@ import { ActionIcon, Button, Modal, Group, Loader, Center, Text, Tooltip } from 
 import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { claimDiagramEditor } from './diagramAutoOpen.js';
 
 const ExcalidrawCanvas = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({
@@ -29,11 +30,11 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
   const data = node.attrs.data || { elements: [], appState: {}, files: {} };
   const hasContent = (data.elements || []).length > 0;
 
+  // A diagram the reader just inserted opens straight into its editor. The
+  // request is claimed once, from memory — never from the document, which would
+  // re-open the editor on every later mount. See diagramAutoOpen.js.
   useEffect(() => {
-    if (node.attrs.autoOpen && editor.isEditable) {
-      updateAttributes({ autoOpen: false });
-      setOpen(true);
-    }
+    if (editor.isEditable && claimDiagramEditor('excalidraw')) setOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -161,7 +162,6 @@ export const ExcalidrawBlock = Node.create({
   addAttributes() {
     return {
       data: { default: { elements: [], appState: {}, files: {} } },
-      autoOpen: { default: false, rendered: false },
     };
   },
   parseHTML() {

@@ -8,6 +8,7 @@ import {
   IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3, IconFileTypePdf, IconSuperscript,
 } from '@tabler/icons-react';
 import { makeSuggestionRender } from './suggestionRender.js';
+import { requestDiagramEditor } from './nodes/diagramAutoOpen.js';
 
 const pickFile = (accept) =>
   new Promise((resolve) => {
@@ -57,13 +58,17 @@ export function buildSlashItems({ uploadFile, uploadDocument }) {
         attrs: { code: 'graph TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[Do it]\n  B -->|No| D[Skip]' },
       }).run() },
     { title: 'Excalidraw', desc: 'Free-form whiteboard drawing', icon: IconPencil, kw: 'draw sketch whiteboard diagram',
-      run: (e, r) => e.chain().focus().deleteRange(r).insertContent({
-        type: 'excalidraw', attrs: { data: { elements: [], appState: {}, files: {} }, autoOpen: true },
-      }).run() },
+      run: (e, r) => {
+        requestDiagramEditor('excalidraw');
+        e.chain().focus().deleteRange(r).insertContent({
+          type: 'excalidraw', attrs: { data: { elements: [], appState: {}, files: {} } },
+        }).run();
+      } },
     { title: 'Draw.io diagram', desc: 'Full diagrams.net editor', icon: IconTopologyStar3, kw: 'drawio diagrams.net flowchart uml network',
-      run: (e, r) => e.chain().focus().deleteRange(r).insertContent({
-        type: 'drawioDiagram', attrs: { autoOpen: true },
-      }).run() },
+      run: (e, r) => {
+        requestDiagramEditor('drawioDiagram');
+        e.chain().focus().deleteRange(r).insertContent({ type: 'drawioDiagram' }).run();
+      } },
     { title: 'Math', desc: 'Inline LaTeX: $E = mc^2$', icon: IconMathFunction, kw: 'latex katex equation formula',
       run: (e, r) => e.chain().focus().deleteRange(r).insertContent('$E = mc^2$ ').run() },
     { title: 'YouTube', desc: 'Embed a YouTube video', icon: IconBrandYoutube, kw: 'video embed',

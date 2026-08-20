@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActionIcon, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { IconMaximize, IconX, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
+import { createPressTracker } from './diagramPress.js';
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 16;
@@ -257,9 +258,10 @@ export function DiagramLightboxHost() {
 
 /**
  * Click opens the zoom viewer, double-click opens the editor (when editable).
- * A short delay lets the double-click win over the single click. The timer is
- * module-level on purpose — a node view re-drawn by the click must not cancel
- * the zoom it just asked for.
+ * A short delay lets the double-click win over the single click. The timer and
+ * the press tracker are module-level on purpose — a node view re-drawn by the
+ * press must not cancel the zoom it just asked for, nor forget the press that
+ * a double-click is about to complete.
  *
  * Everything hangs off mousedown, in the capture phase: pressing on a diagram
  * makes ProseMirror select the node and rebuild its DOM, so by the time a
@@ -267,22 +269,43 @@ export function DiagramLightboxHost() {
  * element it was aimed at is gone and the handler never runs.
  */
 let clickTimer = null;
+const presses = createPressTracker();
+
+// Leaving the page ends whatever was in flight: the zoom a press had just asked
+// for (nobody wants to come back to a full-screen diagram they left behind) and
+// the press itself, so the click that brings the page back cannot pair with the
+// one before it. Focus moving into a frame of this page — the draw.io editor,
+// the offscreen renderer — is not the page losing focus, which is what
+// `document.hasFocus()` distinguishes.
+function endPressesInFlight() {
+  clearTimeout(clickTimer);
+  presses.focusLost();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('blur', () => {
+    if (!document.hasFocus()) endPressesInFlight();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') endPressesInFlight();
+  });
+}
 
 export function useZoomClickHandlers({ editable, onZoom, onEdit }) {
-  const zoom = () => {
-    clearTimeout(clickTimer);
-    clickTimer = setTimeout(onZoom, editable ? 220 : 0);
-  };
   return {
     style: { cursor: 'zoom-in' },
     onMouseDownCapture: (e) => {
       if (e.button !== 0) return;
-      if (e.detail > 1) {
-        clearTimeout(clickTimer);
+      const kind = presses.press({ x: e.clientX, y: e.clientY, time: e.timeStamp });
+      // A press that only brought the page back to the front asked for nothing.
+      if (kind === 'refocus') return;
+      if (kind === 'double') {
+        clearTimeout(clickTimer); // the zoom the first press asked for
         if (editable) onEdit?.();
         return;
       }
-      zoom();
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(onZoom, editable ? 220 : 0);
     },
   };
 }
