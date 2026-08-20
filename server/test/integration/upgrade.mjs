@@ -6,25 +6,46 @@ import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import pg from 'pg';
 
 // Resolved from this file so the checkout can live anywhere.
 const WT = fileURLToPath(new URL('../../..', import.meta.url));
 const ok = (label) => console.log(`  ok  ${label}`);
 
-// Build the pre-migration schema by running the *old* db.js from main, so this
-// is the real previous schema rather than a hand-written approximation.
+// test:integration chains every script against the same DATABASE_URL. By the
+// time this one runs, blocks.mjs has already applied the *current* schema —
+// db.js's CREATE TABLE IF NOT EXISTS would then no-op against those tables,
+// so the "pre-migration" schema below would never actually apply. Reset to a
+// bare database first so it's really pre-migration, not current-schema-in-disguise.
+{
+  const reset = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  await reset.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await reset.end();
+}
+
+// Build the pre-migration schema by running the *old* db.js from the last
+// commit before the float-position -> order-key migration landed, so this is
+// the real previous schema rather than a hand-written approximation.
+//
+// Pinned to a fixed commit rather than origin/main: main *is* the
+// post-migration schema now (as of 366c8d9d, 2026-08-19), so "the old schema"
+// has nothing left to diff against there — a moving ref would make this test
+// silently stop testing the upgrade path the moment main moved past it.
+// 3afb0c3 is 366c8d9d^, the last commit still on float positions.
+const OLD_SCHEMA_REF = '3afb0c3c4f3859efe0783ff394b4d468ab29c1e2';
+
 // Written inside the server package so `pg` resolves the same way it does for
 // the real module.
 const dir = join(WT, 'server', 'src', '__oldschema');
 rmSync(dir, { recursive: true, force: true });
 mkdirSync(dir, { recursive: true });
-const oldDb = execSync(`git -C ${WT} show origin/main:server/src/db.js`, { encoding: 'utf8' });
-const oldConfig = execSync(`git -C ${WT} show origin/main:server/src/search/config.js`, { encoding: 'utf8' });
+const oldDb = execSync(`git -C ${WT} show ${OLD_SCHEMA_REF}:server/src/db.js`, { encoding: 'utf8' });
+const oldConfig = execSync(`git -C ${WT} show ${OLD_SCHEMA_REF}:server/src/search/config.js`, { encoding: 'utf8' });
 writeFileSync(join(dir, 'db.js'), oldDb.replace("./search/config.js", "./config.js"));
 writeFileSync(join(dir, 'config.js'), oldConfig);
 const old = await import(join(dir, 'db.js'));
 await old.migrate();
-ok('the pre-migration schema from origin/main was applied');
+ok(`the pre-migration schema from ${OLD_SCHEMA_REF.slice(0, 7)} was applied`);
 
 // `pg` is resolved through the old module rather than imported here, so this
 // script does not need to live inside the server package.

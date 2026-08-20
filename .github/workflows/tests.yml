@@ -27,7 +27,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      # test/integration/upgrade.mjs diffs the pre-migration schema straight
+      # out of `origin/main` via `git show`, so this needs real history and a
+      # local origin/main ref, not the default single-commit shallow clone.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
