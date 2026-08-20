@@ -17,16 +17,8 @@ function Btn({ active, onClick, title, children }) {
   );
 }
 
-export default function BubbleToolbar({ editor }) {
+export default function BubbleToolbar({ editor, onEditLink }) {
   if (!editor) return null;
-
-  const setLink = () => {
-    const prev = editor.getAttributes('link').href || '';
-    const url = window.prompt('Link URL', prev);
-    if (url === null) return;
-    if (url === '') editor.chain().focus().unsetLink().run();
-    else editor.chain().focus().setLink({ href: url }).run();
-  };
 
   const blockLabel = editor.isActive('heading', { level: 1 }) ? 'Heading 1'
     : editor.isActive('heading', { level: 2 }) ? 'Heading 2'
@@ -78,7 +70,7 @@ export default function BubbleToolbar({ editor }) {
           <Btn active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()} title="Inline code"><IconCode size={16} /></Btn>
           <Btn active={editor.isActive('superscript')} onClick={() => editor.chain().focus().toggleSuperscript().run()} title="Superscript"><IconSuperscript size={16} /></Btn>
           <Btn active={editor.isActive('subscript')} onClick={() => editor.chain().focus().toggleSubscript().run()} title="Subscript"><IconSubscript size={16} /></Btn>
-          <Btn active={editor.isActive('link')} onClick={setLink} title="Link"><IconLink size={16} /></Btn>
+          <Btn active={editor.isActive('link')} onClick={onEditLink} title="Link"><IconLink size={16} /></Btn>
           <Divider orientation="vertical" />
           <Menu withinPortal>
             <Menu.Target>
