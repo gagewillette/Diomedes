@@ -855,3 +855,135 @@
 @media print {
   .gd-findbar { display: none; }
 }
+
+/* ---------- footnotes ---------- */
+
+/* The number is never stored — it arrives as a decoration attribute and is
+   drawn here. That is what lets a footnote inserted halfway up the page
+   renumber everything below it without writing a single character. */
+.gd-footnote-ref {
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: super;
+  color: var(--mantine-color-blue-6);
+  cursor: pointer;
+  padding: 0 0.15em;
+  /* A superscript digit is a tiny target; this keeps the clickable box at a
+     usable size without changing how the number looks. */
+  min-width: 12px;
+  display: inline-block;
+  text-align: center;
+  border-radius: 3px;
+}
+.gd-footnote-ref::after { content: attr(data-n); }
+.gd-footnote-ref:hover,
+.gd-footnote-ref:focus-visible {
+  background: var(--mantine-color-blue-light);
+  outline: none;
+}
+/* Reads as a control rather than an exponent the moment you point at it. */
+.gd-footnote-ref:hover::before,
+.gd-footnote-ref:focus-visible::before { content: '['; }
+.gd-footnote-ref:hover::after,
+.gd-footnote-ref:focus-visible::after { content: attr(data-n) ']'; }
+.ProseMirror-selectednode.gd-footnote-ref { outline: 2px solid var(--mantine-color-blue-4); }
+
+.gd-footnotes {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--mantine-color-default-border);
+  font-size: 0.88em;
+  color: var(--mantine-color-dimmed);
+}
+.gd-footnotes-head {
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+  margin-bottom: 0.5rem;
+  user-select: none;
+}
+.gd-footnotes-list { counter-reset: gd-footnote; }
+
+.gd-footnote {
+  counter-increment: gd-footnote;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.15rem 0;
+  scroll-margin-top: 5rem;
+}
+.gd-footnote-gutter {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  user-select: none;
+  min-width: 2.4em;
+}
+/* The counter, not a stored attribute: entries are kept in reference order by
+   the reconciler, so counting down the list gives exactly the numbers the
+   references carry. */
+.gd-footnote-n::before {
+  content: counter(gd-footnote) '.';
+  font-weight: 600;
+  color: var(--mantine-color-text);
+}
+.gd-footnote-backref {
+  background: none;
+  border: 0;
+  padding: 0 1px;
+  cursor: pointer;
+  color: var(--mantine-color-blue-6);
+  font-size: 0.9em;
+  line-height: 1;
+  border-radius: 3px;
+}
+.gd-footnote-backref:hover { background: var(--mantine-color-blue-light); }
+.gd-footnote-body { flex: 1; min-width: 0; }
+.gd-footnote-body > :first-child { margin-top: 0; }
+.gd-footnote-body > :last-child { margin-bottom: 0; }
+.gd-footnote:focus { outline: none; }
+
+/* ---------- footnote hover preview ---------- */
+.tippy-box[data-theme~='gd-footnote'] {
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  box-shadow: var(--mantine-shadow-md);
+}
+.tippy-box[data-theme~='gd-footnote'] .tippy-arrow { color: var(--mantine-color-body); }
+.gd-footnote-popup {
+  display: flex;
+  gap: 0.5rem;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  text-align: left;
+}
+.gd-footnote-popup-n { flex: none; font-weight: 700; color: var(--mantine-color-blue-6); }
+.gd-footnote-popup-body {
+  /* Long notes fade rather than filling the screen; the reference is still
+     there to click if you want the whole thing. */
+  max-height: 11em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 8.5em, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 8.5em, transparent);
+}
+.gd-footnote-popup-body > :first-child { margin-top: 0; }
+.gd-footnote-popup-body > :last-child { margin-bottom: 0; }
+
+/* ---------- shared jump-target flash (footnotes today, §-refs next) ---------- */
+.gd-scroll-flash { animation: gd-scroll-flash 1.1s ease-out; }
+@keyframes gd-scroll-flash {
+  0%, 25% { background: var(--mantine-color-yellow-light); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The flash is the landing cue for someone who did not see the scroll, so it
+     stays — it just arrives and leaves without the fade. */
+  .gd-scroll-flash { animation-duration: 0.01s; }
+}
