@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Group, Modal, Radio, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
+import { trackedUpload } from '../lib/uploadStore.js';
 import { docKindFor } from './nodes/DocumentBlock.jsx';
 
 /**
@@ -67,7 +68,7 @@ export function useDocumentUpload(pageId) {
       fd.append('file', file);
       fd.append('storeAs', storeAs);
       try {
-        return await api.post(`/api/pages/${pageId}/documents`, fd);
+        return await trackedUpload(`/api/pages/${pageId}/documents`, file, fd);
       } catch (err) {
         notifications.show({ color: 'red', message: `Upload failed: ${err.message}` });
         return null;
