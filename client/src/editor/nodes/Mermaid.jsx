@@ -5,9 +5,9 @@ import { ActionIcon, Textarea, Button, Group, Text, Tooltip } from '@mantine/cor
 import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { nextRenderId, removeRenderScratch } from '../../lib/mermaidRender.js';
 
 let mermaidPromise = null;
-let renderCounter = 0;
 async function getMermaid(dark) {
   if (!mermaidPromise) mermaidPromise = import('mermaid').then((m) => m.default);
   const mermaid = await mermaidPromise;
@@ -33,15 +33,16 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const id = nextRenderId();
       try {
         const mermaid = await getMermaid(colorScheme === 'dark');
-        const id = `gd-mermaid-${++renderCounter}`;
         const { svg: out } = await mermaid.render(id, node.attrs.code || 'graph TD\n  A[empty]');
         if (!cancelled && alive.current) { setSvg(out); setError(null); }
       } catch (err) {
-        // mermaid leaves an orphan error div behind on failure
-        document.querySelector(`#dgd-mermaid-${renderCounter}`)?.remove();
-        if (!cancelled && alive.current) setError(String(err?.message || err));
+        // mermaid leaves an orphan error div behind on failure — this render's,
+        // not whichever one the counter has reached by now
+        removeRenderScratch(id);
+        if (!cancelled && alive.current) { setSvg(''); setError(String(err?.message || err)); }
       }
     })();
     return () => { cancelled = true; };
