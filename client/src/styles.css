@@ -1004,3 +1004,42 @@
      stays — it just arrives and leaves without the fade. */
   .gd-scroll-flash { animation-duration: 0.01s; }
 }
+
+/* ---------- emoji picker ---------- */
+.gd-emoji-viewport {
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Scrolling the grid should never scroll the page behind the modal. */
+  overscroll-behavior: contain;
+}
+.gd-emoji-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+}
+.gd-emoji-heading {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--mantine-color-body);
+}
+.gd-emoji-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.gd-emoji-cell:hover,
+.gd-emoji-cell[data-active] {
+  background: var(--mantine-color-default-hover);
+}
+/* The icon the page already has, so you can see what you are replacing. */
+.gd-emoji-cell[data-current] {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-blue-5);
+}

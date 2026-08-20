@@ -5,7 +5,7 @@ import {
 import {
   IconChevronRight, IconDots, IconPlus, IconTrash, IconArrowUp, IconArrowDown,
   IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText, IconSitemap,
-  IconFileImport, IconX, IconFileZip,
+  IconFileImport, IconX, IconFileZip, IconMoodSmile,
 } from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -14,6 +14,8 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { focusEditor, onFocusFileTree } from '../lib/vimFocus.js';
 import { jumpParent, moveDown, moveUp } from './vimTreeNav.js';
 import PagePicker from './PagePicker.jsx';
+import Emoji from './Emoji.jsx';
+import IconPickerModal from './IconPickerModal.jsx';
 import { markdownToJSON } from '../lib/markdown.js';
 import { exportPageZip } from '../lib/exportZip.js';
 import { dragState, dropIntent, multiDragImage } from '../lib/pageDrag.js';
@@ -48,6 +50,7 @@ export default function PageTree({ space }) {
   const [selected, setSelected] = useState([]); // multi-selected ids, in tree order
   const [anchorId, setAnchorId] = useState(null); // where the next shift-click measures from
   const [confirmTrash, setConfirmTrash] = useState(false);
+  const [iconPage, setIconPage] = useState(null); // page whose icon is being chosen
   const hoverTimer = useRef(null);
   const [importParent, setImportParent] = useState(null);
   const [importDoc, setImportDoc] = useState(null); // { body, fallbackTitle }
@@ -588,7 +591,7 @@ export default function PageTree({ space }) {
           >
             <Group gap={6} wrap="nowrap">
               <span className="gd-tree-icon">
-                {page.icon ? page.icon : <IconFileText size={14} opacity={0.6} />}
+                {page.icon ? <Emoji char={page.icon} size={15} /> : <IconFileText size={14} opacity={0.6} />}
               </span>
               <Text size="sm" truncate>{page.title || 'Untitled'}</Text>
             </Group>
@@ -622,6 +625,12 @@ export default function PageTree({ space }) {
                         </Menu.Item>
                       </>
                     )}
+                    <Menu.Item
+                      leftSection={<IconMoodSmile size={14} />}
+                      onClick={() => setIconPage(page)}
+                    >
+                      {page.icon ? 'Change icon' : 'Set icon'}
+                    </Menu.Item>
                     <Menu.Item
                       leftSection={<IconPencil size={14} />}
                       onClick={() => {
@@ -718,6 +727,15 @@ export default function PageTree({ space }) {
           const file = e.target.files?.[0];
           e.target.value = '';
           if (file) readImportFile(file);
+        }}
+      />
+      <IconPickerModal
+        page={iconPage}
+        onClose={() => setIconPage(null)}
+        onPick={(icon) => {
+          const id = iconPage.id;
+          setIconPage(null);
+          act(() => api.patch(`/api/pages/${id}`, { icon }));
         }}
       />
       <Modal opened={!!importDoc} onClose={closeImport} title="Import markdown file" centered>
