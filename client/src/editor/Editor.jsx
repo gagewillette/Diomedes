@@ -40,6 +40,7 @@ import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
+import { useFileDrop } from './useFileDrop.js';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
 
 const lowlight = createLowlight(common);
@@ -140,18 +141,12 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
     onUpdate: ({ editor: e }) => onUpdate?.(e),
     editorProps: {
       attributes: { class: 'gd-editor' },
-      handleDrop: (view, event, _slice, moved) => {
-        if (moved || !uploadFile || !event.dataTransfer?.files?.length) return false;
-        event.preventDefault();
-        const files = Array.from(event.dataTransfer.files);
-        // Drop lands where the pointer is, not where the caret was.
-        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
-        handleFiles(view, files, pos);
-        return true;
-      },
-      handlePaste: (view, event) => {
+      // Drops are handled by useFileDrop on the wrapper, not here — see the
+      // comment there for why ProseMirror's own drop path can't be trusted
+      // with files.
+      handlePaste: (_view, event) => {
         if (!uploadFile || !event.clipboardData?.files?.length) return false;
-        handleFiles(view, Array.from(event.clipboardData.files));
+        handleFiles(Array.from(event.clipboardData.files));
         return true;
       },
     },
@@ -172,17 +167,20 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
   // Dropped/pasted files, one at a time so a PPTX can stop and ask how it
   // should be stored. `pos` is the drop point; each insertion moves it along so
   // a multi-file drop keeps its order.
-  async function handleFiles(view, files, pos) {
+  async function handleFiles(files, pos) {
+    const view = editor?.view;
+    if (!view) return;
     let at = pos;
     for (const file of files) {
-      if (uploadDocumentRef.current && docKindFor(file)) {
-        const res = await uploadDocumentRef.current(file);
+      // A PDF or PPTX becomes a document card — the same one /document makes.
+      if (docKindFor(file)) {
+        const res = await uploadDocumentRef.current?.(file);
         if (!res) continue;
         at = insertDocument(at, res);
-      } else {
+      } else if (uploadFile) {
         const url = await uploadFile(file);
         if (!url) continue;
-        insertUploaded(view, file, url, at);
+        at = insertUploaded(view, file, url, at);
       }
     }
   }
@@ -190,7 +188,7 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
   // The bar is a block node and always sits on its own line. Returns the
   // position just after it, for the next file in the batch.
   function insertDocument(pos, res) {
-    const at = pos ?? editor.state.selection.from;
+    const at = Math.min(pos ?? editor.state.selection.from, editor.state.doc.content.size);
     editor
       .chain()
       .focus()
@@ -199,6 +197,7 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
     return editor.state.selection.to;
   }
 
+  // Returns the position just after the insertion, for the next file.
   function insertUploaded(view, file, url, pos) {
     const { schema } = view.state;
     let node;
@@ -210,16 +209,31 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
       node = para;
     }
     const tr = view.state.tr;
-    if (pos != null) tr.insert(pos, node);
-    else tr.replaceSelectionWith(node);
+    let end;
+    if (pos != null) {
+      const at = Math.min(pos, view.state.doc.content.size);
+      tr.insert(at, node);
+      end = at + node.nodeSize;
+    } else {
+      tr.replaceSelectionWith(node);
+      end = tr.selection.to;
+    }
     view.dispatch(tr);
+    return end;
   }
 
   const smoothCaret = editable && preferences.smoothCaret;
 
+  const { ref: dropRef, isOver } = useFileDrop({
+    editor,
+    enabled: Boolean(editor && editable && pageId),
+    onFiles: handleFiles,
+  });
+
   return (
     <div
-      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''}`}
+      ref={dropRef}
+      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''} ${isOver ? 'is-file-drop' : ''}`}
       style={{
         '--gd-font-family': FONT_STACKS[preferences.fontFamily] || FONT_STACKS.system,
         '--gd-font-size': `${preferences.fontSize}px`,

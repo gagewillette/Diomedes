@@ -9,6 +9,17 @@
 
 /* ---------- smooth (Word-style) caret ---------- */
 .gd-editor-wrap { position: relative; }
+/* Shown while files are dragged over the editor. */
+.gd-editor-wrap.is-file-drop::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 2px dashed var(--mantine-color-blue-5);
+  border-radius: 8px;
+  background: var(--mantine-color-blue-light);
+  pointer-events: none;
+  z-index: 80;
+}
 .gd-caret-hidden .gd-editor { caret-color: transparent; }
 .gd-smooth-caret {
   position: absolute;
