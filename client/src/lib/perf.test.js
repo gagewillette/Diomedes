@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { screenName, apiName, parseServerTiming, shouldSample } from '../src/lib/perf.js';
-import { formatBytes, formatMs, formatCount, formatDuration } from '../src/lib/format.js';
+import { screenName, apiName, parseServerTiming, shouldSample } from './perf.js';
+import { formatBytes, formatMs, formatCount, formatDuration } from './format.js';
 
 test('screen names collapse ids so every page open lands in one bucket', () => {
   assert.equal(screenName('/'), '/');

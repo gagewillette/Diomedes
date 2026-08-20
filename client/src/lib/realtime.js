@@ -6,6 +6,8 @@ const EVENT_TYPES = [
   'users-changed',
   'account-changed',
   'workspace-settings-changed',
+  'pages-changed',
+  'page-moved',
 ];
 
 const MAX_ATTEMPTS = 8;

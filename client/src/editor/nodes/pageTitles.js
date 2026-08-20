@@ -2,7 +2,7 @@
 // renamed since. Every link chip on screen asks here for the current title;
 // requests made in the same tick are answered by one batched round trip, so a
 // document with fifty links still costs a single request.
-import { api, onPagesChanged } from '../../lib/api.js';
+import { api, onPagesChanged, onAppEvent } from '../../lib/api.js';
 
 const cache = new Map(); // pageId -> { title, icon, spaceSlug } | null when gone
 const subscribers = new Map(); // pageId -> Set<callback>
@@ -71,5 +71,8 @@ export function clearTitleCache() {
   }
 }
 
-// Renaming a page anywhere in the app invalidates every chip pointing at it.
+// Renaming a page anywhere in the app invalidates every chip pointing at it,
+// and so does moving one: a page dragged into another space keeps its id but
+// changes the URL every chip renders.
 onPagesChanged(() => clearTitleCache());
+onAppEvent('page-moved', () => clearTitleCache());

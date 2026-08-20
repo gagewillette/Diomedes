@@ -62,6 +62,17 @@ export function AuthProvider({ children }) {
         case 'users-changed':
           emit('users-changed', detail);
           break;
+        case 'pages-changed':
+          // Someone rearranged a tree. Screens already listen on this channel
+          // for their own edits, so the sidebar redraws and every [[link]] chip
+          // re-resolves the URL it renders.
+          emit('pages-changed', detail);
+          break;
+        case 'page-moved':
+          // A page changed space, which changes its URL. Whoever has it open
+          // reroutes; everyone else has already been covered by 'pages-changed'.
+          emit('page-moved', detail);
+          break;
         case 'workspace-settings-changed':
           // Workspace-wide switches take effect everywhere at once: the payload
           // carries the new settings, so no refetch is needed.
@@ -77,6 +88,7 @@ export function AuthProvider({ children }) {
           emit('spaces-changed', {});
           emit('users-changed', {});
           emit('space-members-changed', {});
+          emit('pages-changed', {});
           break;
         default:
           break;

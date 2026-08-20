@@ -42,13 +42,14 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ✅ Yjs CRDT over a websocket at `/api/collab/<pageId>`, persisted to postgres and mirrored between app processes over Redis. Live carets while typing, Miro-style mouse pointers while reading, colours derived from the user id — see [docs/realtime-collaboration.md](docs/realtime-collaboration.md) |
 | Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
+| Find in page (Ctrl/⌘+F) | ✅ Overrides the browser's find — literal or regular-expression search with match counter, next/previous, case toggle and in-place highlighting; works on shared read-only pages too |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |
 | Semantic / AI search | ✅ Optional (`SEMANTIC_SEARCH_ENABLED`) — pgvector embeddings fused with full-text by reciprocal rank fusion, embedded in the background on save, falls back to full-text if the API is down |
 | Trash / restore pages | ✅ Soft-delete with per-space trash, restore, permanent delete |
 | Favorites / starred pages | ✅ |
 | Recently updated pages | ✅ Home dashboard |
 | PDF export / printing | ✅ Print stylesheet (browser Print → PDF) |
-| Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse). Notion/Confluence zips ➖ |
+| Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse), into a space or under a top-level page. Notion/Confluence zips ➖ |
 | Export: Markdown / HTML | ✅ Per-page export to .md and .html |
 | Public page sharing via link | ✅ Token links, revocable, read-only, no login needed |
 | Translations (10+ languages) | ➖ English only |
@@ -60,7 +61,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
-| Nested page tree with reordering | ✅ Infinite nesting, move up/down/indent/outdent + move-to-space |
+| Nested page tree with reordering | ✅ One level of subpages, drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space. Deeper nesting is tracked as its own feature |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |

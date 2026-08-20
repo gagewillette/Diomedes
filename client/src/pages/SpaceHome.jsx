@@ -73,8 +73,7 @@ export default function SpaceHome() {
       try {
         const text = await file.text();
         const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
-        const d = await api.post('/api/pages', { spaceId: space.id, title });
-        await api.patch(`/api/pages/${d.page.id}`, { content: markdownToJSON(text), title });
+        await api.post('/api/pages', { spaceId: space.id, title, content: markdownToJSON(text) });
         imported++;
       } catch (err) {
         notifications.show({ color: 'red', message: `${file.name}: ${err.message}` });

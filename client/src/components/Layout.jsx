@@ -14,8 +14,21 @@ import { notifications } from '@mantine/notifications';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { api } from '../lib/api.js';
 import { startRoute, settleRoute } from '../lib/perf.js';
+import { focusEditor, focusFileTree } from '../lib/vimFocus.js';
 import PageTree from './PageTree.jsx';
 import SearchModal from './SearchModal.jsx';
+
+const NAV_WIDTH_KEY = 'gd-nav-width';
+const NAV_WIDTH_DEFAULT = 280;
+const NAV_WIDTH_MIN = 190;
+const NAV_WIDTH_MAX = 560;
+
+const clampNavWidth = (w) => Math.min(NAV_WIDTH_MAX, Math.max(NAV_WIDTH_MIN, Math.round(w)));
+
+const readStoredNavWidth = () => {
+  const stored = Number(localStorage.getItem(NAV_WIDTH_KEY));
+  return Number.isFinite(stored) && stored > 0 ? clampNavWidth(stored) : NAV_WIDTH_DEFAULT;
+};
 
 export default function Layout({ children }) {
   const { user, workspaceName, logout, isAdmin, preferences } = useAuth();
@@ -26,6 +39,8 @@ export default function Layout({ children }) {
   const [newSpaceOpen, newSpaceHandlers] = useDisclosure(false);
   const [navOpen, navHandlers] = useDisclosure(true);
   const [newSpace, setNewSpace] = useState({ name: '', icon: '📚', description: '' });
+  const [navWidth, setNavWidth] = useState(readStoredNavWidth);
+  const [resizing, setResizing] = useState(false);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const slug = pathname.startsWith('/s/') ? pathname.split('/')[2] : null;
@@ -40,12 +55,64 @@ export default function Layout({ children }) {
 
   useHotkeys([['mod+K', () => searchHandlers.open()]]);
 
+  // Vim's window motions, scaled down to the two panes this app has: Ctrl+H to
+  // the page tree, Ctrl+L back to the document. Capture phase, because in
+  // normal mode the editor is swallowing keystrokes of its own.
+  const vim = preferences.keymap === 'vim';
+  useEffect(() => {
+    if (!vim) return undefined;
+    const handler = (e) => {
+      if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        navHandlers.open();
+        focusFileTree();
+      } else if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        focusEditor();
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [vim, navHandlers]);
+
   const loadSpaces = useCallback(async () => {
     const data = await api.get('/api/spaces');
     setSpaces(data.spaces);
   }, []);
 
   useEffect(() => { loadSpaces(); }, [loadSpaces]);
+
+  useEffect(() => { localStorage.setItem(NAV_WIDTH_KEY, String(navWidth)); }, [navWidth]);
+
+  // drag the handle on the navbar's right edge to resize it
+  useEffect(() => {
+    if (!resizing) return undefined;
+    const onMove = (e) => setNavWidth(clampNavWidth(e.clientX));
+    const stop = () => setResizing(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+    };
+  }, [resizing]);
+
+  const onResizerKeyDown = (e) => {
+    const step = e.shiftKey ? 40 : 10;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setNavWidth((w) => clampNavWidth(w - step)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); setNavWidth((w) => clampNavWidth(w + step)); }
+    else if (e.key === 'Home') { e.preventDefault(); setNavWidth(NAV_WIDTH_MIN); }
+    else if (e.key === 'End') { e.preventDefault(); setNavWidth(NAV_WIDTH_MAX); }
+  };
   useEffect(() => {
     const handler = () => loadSpaces();
     window.addEventListener('spaces-changed', handler);
@@ -74,14 +141,15 @@ export default function Layout({ children }) {
   return (
     <AppShell
       className={preferences.animations ? '' : 'gd-anim-off'}
-      navbar={{ width: 280, breakpoint: 'sm', collapsed: { mobile: !navOpen, desktop: !navOpen } }}
+      navbar={{ width: navWidth, breakpoint: 'sm', collapsed: { mobile: !navOpen, desktop: !navOpen } }}
       padding={0}
     >
       <AppShell.Navbar p="xs">
         <Group justify="space-between" px={4} mb={4} wrap="nowrap">
-          <UnstyledButton component={Link} to="/">
+          <UnstyledButton component={Link} to="/" className="gd-nav-title" title={workspaceName}>
             <Group gap={8} wrap="nowrap">
-              <Text fw={800} size="md" truncate>📝 {workspaceName}</Text>
+              <span className="gd-tree-icon">📝</span>
+              <Text fw={800} size="md" truncate>{workspaceName}</Text>
             </Group>
           </UnstyledButton>
           <Group gap={2} wrap="nowrap">
@@ -164,9 +232,9 @@ export default function Layout({ children }) {
                   >
                     {open ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
                   </ActionIcon>
-                  <UnstyledButton className="gd-tree-label" component={Link} to={`/s/${space.slug}`}>
+                  <UnstyledButton className="gd-tree-label" component={Link} to={`/s/${space.slug}`} title={space.name}>
                     <Group gap={6} wrap="nowrap">
-                      <span>{space.icon}</span>
+                      <span className="gd-tree-icon">{space.icon}</span>
                       <Text size="sm" fw={600} truncate>{space.name}</Text>
                     </Group>
                   </UnstyledButton>
@@ -178,6 +246,20 @@ export default function Layout({ children }) {
             );
           })}
         </AppShell.Section>
+
+        <div
+          className={`gd-nav-resizer ${resizing ? 'is-resizing' : ''}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={navWidth}
+          aria-valuemin={NAV_WIDTH_MIN}
+          aria-valuemax={NAV_WIDTH_MAX}
+          tabIndex={0}
+          onPointerDown={(e) => { e.preventDefault(); setResizing(true); }}
+          onDoubleClick={() => setNavWidth(NAV_WIDTH_DEFAULT)}
+          onKeyDown={onResizerKeyDown}
+        />
       </AppShell.Navbar>
 
       <AppShell.Main className={navOpen ? undefined : 'gd-nav-collapsed'}>
