@@ -39,6 +39,7 @@ import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { FindInPage } from './FindInPage.js';
+import { BlockId } from './blockId.js';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
@@ -109,6 +110,10 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
     FindInPage,
+    // Stamps a stable id on every block. Position in this list does not matter:
+    // global attributes are applied to the types they name once the whole
+    // extension set is resolved, so DocumentBlock below is covered too.
+    BlockId,
     ...(collab
       ? [
           Collaboration.configure({ document: collab.ydoc, field: 'default' }),
