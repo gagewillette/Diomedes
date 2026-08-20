@@ -130,7 +130,8 @@ document with ids stripped makes every block look new. See
 | POST | `/api/pages/delete-many` | `{pageIds[]}` — soft-delete several subtrees in one statement; returns `{trashed}`, the number of pages that went to the trash including subpages |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |
-| GET | `/api/spaces/:id/trash` | |
+| GET | `/api/spaces/:id/trash` | Returns `{pages}` (most recent 100) and `total`, the full count of trashed pages |
+| DELETE | `/api/spaces/:id/trash` | (space admin) Empty the trash: permanently deletes every trashed page in the space along with its versions, blocks, comments, links, attachments and embeddings, and removes the attachment files from storage. Returns `{deleted}`. Cannot be undone. |
 | GET | `/api/pages/recent` | Recent pages across caller's spaces |
 | GET | `/api/search?q=…&space=…` | Full-text; snippets mark hits with `[[[` `]]]` |
 
