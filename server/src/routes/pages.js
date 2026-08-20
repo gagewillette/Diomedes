@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { q, pool } from '../db.js';
-import { asyncRoute, httpError, extractText, randomToken } from '../lib/util.js';
+import { asyncRoute, httpError, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
 import { getHub } from '../collab/index.js';
@@ -264,10 +264,10 @@ router.patch(
     if (title !== undefined && title !== page.title) {
       // A rename can both attract dangling links and orphan ones that had
       // adopted the old title.
-      await resolveLinksByTitle({ id: page.id, title: newTitle, space_id: page.space_id });
-      await unresolveStaleTitleLinks({ id: page.id, title: newTitle });
+      await resolveLinksByTitle({ id: page.id, title: written.page.title, space_id: page.space_id });
+      await unresolveStaleTitleLinks({ id: page.id, title: written.page.title });
     }
-    res.json({ page: rows[0] });
+    res.json({ page: written.page });
   })
 );
 
