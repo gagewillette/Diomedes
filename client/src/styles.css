@@ -273,6 +273,30 @@
   border-radius: 6px; color: var(--mantine-color-dimmed);
 }
 .gd-tree-add:hover { background: var(--mantine-color-default-hover); }
+
+/* ---------- dragging pages around the tree ---------- */
+/* The row keeps its place while it is dragged — pulling it out from under the
+   cursor would move every drop target the moment the drag began. */
+.gd-tree-row.is-dragging { opacity: 0.4; }
+.gd-tree-row[draggable='true'] { cursor: grab; }
+/* Drop hints are drawn as insets rather than borders so a row never changes
+   height mid-drag and nudges the rows below it out from under the cursor. */
+.gd-tree-row.is-drop-before,
+.gd-tree-row.is-drop-after {
+  box-shadow: inset 0 2px 0 0 var(--mantine-color-blue-filled);
+}
+.gd-tree-row.is-drop-after { box-shadow: inset 0 -2px 0 0 var(--mantine-color-blue-filled); }
+/* "Inside" reads as the page swallowing the one being dropped, so it fills
+   rather than draws a line. */
+.gd-tree-row.is-drop-inside {
+  background: var(--mantine-color-blue-light);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+}
+.gd-tree-root-drop { border-radius: 6px; }
+.gd-tree-root-drop.is-drop-root {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  background: var(--mantine-color-blue-light);
+}
 .gd-nav-link {
   display: block; padding: 6px 8px; border-radius: 6px; width: 100%;
 }

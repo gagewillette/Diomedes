@@ -45,7 +45,7 @@ function findWikiLinkMatch({ $position }) {
   };
 }
 
-function PageLinkView({ node }) {
+function PageLinkView({ node, updateAttributes, editor }) {
   const { pageId, label, spaceSlug } = node.attrs;
   // `undefined` = not looked up yet (show the written label), `null` = the page
   // is gone or unreadable, an object = the page as it is titled right now.
@@ -55,6 +55,19 @@ function PageLinkView({ node }) {
     if (!pageId) return undefined;
     return subscribeTitle(pageId, setLive);
   }, [pageId]);
+
+  // The stored `spaceSlug` is a cache of where the target lives, and a page
+  // dragged into another space invalidates it everywhere it was written. The
+  // server repairs the documents it can reach, but a page being edited right
+  // now has its text in the CRDT, where a database rewrite would be overwritten
+  // by the next snapshot. So the chip that noticed the drift fixes its own
+  // node: the edit travels to every collaborator like any other, and the next
+  // snapshot carries the corrected slug to storage.
+  useEffect(() => {
+    if (!pageId || !live?.spaceSlug || live.spaceSlug === spaceSlug) return;
+    if (!editor?.isEditable) return;
+    updateAttributes({ spaceSlug: live.spaceSlug });
+  }, [pageId, live?.spaceSlug, spaceSlug, editor, updateAttributes]);
 
   const resolved = Boolean(pageId) && live !== null;
   const text = (live?.title ?? label) || 'Untitled';

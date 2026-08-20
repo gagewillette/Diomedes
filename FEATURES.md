@@ -60,7 +60,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
-| Nested page tree with reordering | ✅ Infinite nesting, move up/down/indent/outdent + move-to-space |
+| Nested page tree with reordering | ✅ Infinite nesting, drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |
