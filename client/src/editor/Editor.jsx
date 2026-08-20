@@ -33,6 +33,8 @@ import { SlashCommand, buildSlashItems } from './SlashCommand.jsx';
 import { makeSuggestionRender } from './suggestionRender.js';
 import MentionList from './MentionList.jsx';
 import BubbleToolbar from './BubbleToolbar.jsx';
+import { useLinkDialog } from './LinkDialog.jsx';
+import { LinkClick } from './linkClick.js';
 import { Callout } from './nodes/Callout.jsx';
 import { Toggle } from './nodes/Toggle.jsx';
 import { MermaidDiagram } from './nodes/Mermaid.jsx';
@@ -104,7 +106,16 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // ./code/languages.js) and its own NodeView. `codeIntelligence` is the
     // same object the lint plugin reads, so a workspace toggle reaches both.
     CodeBlock.configure({ codeIntelligence }),
-    Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
+    // `openOnClick` is TipTap's own navigation, which uses the current tab and
+    // only runs for readers. LinkClick below replaces it: new tab, both modes,
+    // and the href is re-checked on the way out.
+    Link.configure({
+      openOnClick: false,
+      autolink: true,
+      linkOnPaste: true,
+      HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer nofollow' },
+    }),
+    LinkClick,
     Image.configure({ allowBase64: true }),
     Table.configure({ resizable: true }),
     TableRow, TableCell, TableHeader,
@@ -410,6 +421,8 @@ export default function Editor({
     return end;
   }
 
+  const { open: openLinkDialog, element: linkDialog } = useLinkDialog(editor);
+
   const livePointers = dataSavings.livePointers;
   const peers = usePresence({
     session: collab,
@@ -450,12 +463,13 @@ export default function Editor({
         '--gd-line-height': preferences.lineHeight,
       }}
     >
-      {editable && <BubbleToolbar editor={editor} />}
+      {editable && <BubbleToolbar editor={editor} onEditLink={openLinkDialog} />}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
       {collab && livePointers && <PointerLayer peers={peers} />}
       {vimEnabled && <VimStatus editor={editor} />}
       {editable && documentPrompt}
+      {editable && linkDialog}
     </div>
   );
 }
