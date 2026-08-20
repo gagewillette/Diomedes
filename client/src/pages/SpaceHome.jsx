@@ -17,6 +17,7 @@ import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { markdownToJSON } from '../lib/markdown.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { makeConfirmPhrase, confirmPhraseMatches, CONFIRM_LENGTH } from '../lib/confirmPhrase.js';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 import Emoji from '../components/Emoji.jsx';
 
 export default function SpaceHome() {
@@ -58,6 +59,9 @@ export default function SpaceHome() {
     [load, space, user?.id]
   );
   useEffect(() => onAppEvent('spaces-changed', load), [load]);
+
+  // No document open: the space itself is what the window is showing.
+  useDocumentIdentity(space?.name, space?.icon);
 
   if (!space) return <Center h="60vh"><Loader /></Center>;
   const canWrite = ['admin', 'writer'].includes(space.my_role);

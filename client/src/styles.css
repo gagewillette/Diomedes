@@ -805,6 +805,14 @@ body.gd-block-drag-active {
   color: var(--mantine-color-white);
   border-radius: 1px;
 }
+/* An empty line has no character to sit on, so the block is given a width of
+   its own — otherwise the cursor would be invisible there. */
+.gd-vim-block-cursor-empty {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  vertical-align: text-bottom;
+}
 .gd-editor.gd-vim-normal,
 .gd-editor.gd-vim-visual,
 .gd-editor.gd-vim-command { caret-color: transparent; }

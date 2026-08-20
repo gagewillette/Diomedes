@@ -10,6 +10,7 @@ import '@mantine/spotlight/styles.css';
 import 'katex/dist/katex.min.css';
 import './styles.css';
 import App from './App.jsx';
+import UploadProgress from './components/UploadProgress.jsx';
 
 const theme = createTheme({
   primaryColor: 'blue',
@@ -23,6 +24,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <ModalsProvider>
         <Notifications position="bottom-right" />
+        <UploadProgress />
         <BrowserRouter>
           <App />
         </BrowserRouter>
