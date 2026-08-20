@@ -17,6 +17,7 @@ import { api, emitPagesChanged, onAppEvent } from '../lib/api.js';
 import { markdownToJSON } from '../lib/markdown.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { makeConfirmPhrase, confirmPhraseMatches, CONFIRM_LENGTH } from '../lib/confirmPhrase.js';
+import Emoji from '../components/Emoji.jsx';
 
 export default function SpaceHome() {
   const { slug } = useParams();
@@ -91,7 +92,7 @@ export default function SpaceHome() {
     <Container size="md" py="xl" px="lg" className="gd-fade-in">
       <Group justify="space-between" mb="xs">
         <Group gap={10}>
-          <Text style={{ fontSize: 34 }}>{space.icon}</Text>
+          <Emoji char={space.icon} size={34} />
           <div>
             <Title order={2}>{space.name}</Title>
             {space.description && <Text c="dimmed" size="sm">{space.description}</Text>}
@@ -217,7 +218,7 @@ function SpaceInfoModal({ space, opened, onClose, onOpenTrash }) {
       {stats && (
         <Stack gap="md">
           <Group gap={12} wrap="nowrap" align="flex-start">
-            <Text style={{ fontSize: 34, lineHeight: 1 }}>{stats.space.icon}</Text>
+            <Emoji char={stats.space.icon} size={34} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <Text fw={600}>{stats.space.name}</Text>
               <Text size="sm" c="dimmed">
@@ -585,7 +586,7 @@ function TrashModal({ space, opened, onClose, onChanged }) {
         {items.length === 0 && <Text c="dimmed" size="sm">Trash is empty.</Text>}
         {items.map((p) => (
           <Group key={p.id} justify="space-between" wrap="nowrap" className="gd-page-row">
-            <Text size="sm" truncate>{p.icon} {p.title || 'Untitled'}</Text>
+            <Text size="sm" truncate><Emoji char={p.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{p.title || 'Untitled'}</Text>
             <Group gap={4} wrap="nowrap">
               <Text size="xs" c="dimmed">{dayjs(p.deleted_at).fromNow?.() || ''}</Text>
               <Tooltip label="Restore">

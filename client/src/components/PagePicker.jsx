@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, TextInput, Stack, Group, Text, UnstyledButton, Loader, Center } from '@mantine/core';
 import { IconSearch, IconFileText, IconHome } from '@tabler/icons-react';
 import { api } from '../lib/api.js';
+import Emoji from './Emoji.jsx';
 
 // Search-and-pick dialog over every page the user can read. Used to choose a
 // page's parent, so nesting is an explicit choice rather than something you
@@ -83,7 +84,7 @@ export default function PagePicker({
               <Group gap={8} wrap="nowrap">
                 {page.icon ? <span>{page.icon}</span> : <IconFileText size={15} opacity={0.6} />}
                 <Text size="sm" truncate style={{ flex: 1 }}>{page.title || 'Untitled'}</Text>
-                <Text size="xs" c="dimmed">{page.space_icon} {page.space_name}</Text>
+                <Text size="xs" c="dimmed"><Emoji char={page.space_icon} size={12} style={{ verticalAlign: '-1px', marginRight: 3 }} />{page.space_name}</Text>
               </Group>
             </UnstyledButton>
           ))
