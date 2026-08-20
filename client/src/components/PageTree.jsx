@@ -5,7 +5,7 @@ import {
 import {
   IconChevronRight, IconDots, IconPlus, IconTrash, IconArrowUp, IconArrowDown,
   IconIndentIncrease, IconIndentDecrease, IconPencil, IconFileText, IconSitemap,
-  IconFileImport,
+  IconFileImport, IconX,
 } from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -15,12 +15,17 @@ import { focusEditor, onFocusFileTree } from '../lib/vimFocus.js';
 import { jumpParent, moveDown, moveUp } from './vimTreeNav.js';
 import PagePicker from './PagePicker.jsx';
 import { markdownToJSON } from '../lib/markdown.js';
-import { dragState, dropIntent } from '../lib/pageDrag.js';
+import { dragState, dropIntent, multiDragImage } from '../lib/pageDrag.js';
+import { dragPayload, inTreeOrder, nextSelection, treeOrder, visibleOrder } from './pageSelection.js';
 
 // How long a collapsed page has to be hovered before it opens to accept a drop
 // inside it. Long enough that dragging *past* a page never disturbs the tree,
 // short enough that aiming for a grandchild is not a chore.
 const HOVER_EXPAND_MS = 550;
+
+// "Nothing is being dragged", shared so that ending a drag that never started
+// does not hand React a new Set and re-render every row for nothing.
+const EMPTY_SET = new Set();
 
 // Pull a leading `# Heading` off the markdown so it can seed the page title
 // instead of being duplicated in the body.
@@ -37,8 +42,11 @@ export default function PageTree({ space }) {
   const [pages, setPages] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
   const [reparenting, setReparenting] = useState(null); // page whose parent is being chosen
-  const [dragging, setDragging] = useState(null); // id of the page this tree is dragging
+  const [dragging, setDragging] = useState(EMPTY_SET); // ids this tree is dragging
   const [dropAt, setDropAt] = useState(null); // { id, zone } | { id: null, zone: 'root' }
+  const [selected, setSelected] = useState([]); // multi-selected ids, in tree order
+  const [anchorId, setAnchorId] = useState(null); // where the next shift-click measures from
+  const [confirmTrash, setConfirmTrash] = useState(false);
   const hoverTimer = useRef(null);
   const [importParent, setImportParent] = useState(null);
   const [importDoc, setImportDoc] = useState(null); // { body, fallbackTitle }
@@ -82,6 +90,38 @@ export default function PageTree({ space }) {
     }
     return map;
   }, [pages]);
+
+  // The two orders multi-select works in: every page top to bottom, and the
+  // rows actually on screen. See pageSelection.js for why they are not one.
+  const order = useMemo(() => treeOrder(childrenOf), [childrenOf]);
+  const visible = useMemo(() => visibleOrder(childrenOf, expanded), [childrenOf, expanded]);
+
+  // A selection outlives the list it was made from: someone else can trash or
+  // move away a page while it is selected, and a stale id would go on to be
+  // moved or deleted as part of a batch that no longer makes sense.
+  useEffect(() => {
+    setSelected((current) => {
+      if (!current.length) return current;
+      const pruned = inTreeOrder(order, current);
+      return pruned.length === current.length ? current : pruned;
+    });
+  }, [order]);
+
+  // Escape gives the selection back, from anywhere — the sidebar is rarely what
+  // has focus when you decide you did not mean to select five pages.
+  useEffect(() => {
+    // Not while the confirmation is up: there, Escape means "not that" about the
+    // dialog, and throwing the selection away as well would leave the dialog
+    // counting zero pages on its way out.
+    if (!selected.length || confirmTrash) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.length, confirmTrash]);
 
   // auto-expand ancestors of the active page
   useEffect(() => {
@@ -224,14 +264,62 @@ export default function PageTree({ space }) {
     }
   };
 
-  // The tree's own list of a page's siblings, minus the page itself — the same
-  // list the server rebuilds when it resolves an index, so "put it third" means
-  // the same thing on both ends.
+  // The tree's own list of a page's siblings, minus the pages being moved — the
+  // same list the server rebuilds when it resolves an index, so "put it third"
+  // means the same thing on both ends. A whole selection is excluded rather
+  // than one page, because the pages already sitting in the destination list are
+  // about to leave it and must not be counted as neighbours of themselves.
   const siblingsWithout = useCallback(
-    (parentId, excludeId) =>
-      (childrenOf.get(parentId || 'root') || []).filter((p) => p.id !== excludeId),
+    (parentId, excludeIds) =>
+      (childrenOf.get(parentId || 'root') || []).filter((p) => !excludeIds.has(p.id)),
     [childrenOf]
   );
+
+  // ---- selecting several pages ----
+
+  const clearSelection = () => {
+    setSelected([]);
+    setAnchorId(null);
+  };
+
+  // A click on a row is either navigation or selection, never both: ⌘ or shift
+  // means you are gathering pages, and opening one under the cursor would throw
+  // away the editor you were about to move things next to.
+  const onRowClick = (page) => (e) => {
+    const meta = e.metaKey || e.ctrlKey;
+    if (!meta && !e.shiftKey) {
+      clearSelection();
+      setAnchorId(page.id);
+      setCursorId(page.id);
+      navigate(`/s/${space.slug}/p/${page.id}`);
+      return;
+    }
+    // Shift-clicking inside a button otherwise paints a text selection across
+    // half the sidebar.
+    e.preventDefault();
+    window.getSelection?.()?.removeAllRanges();
+    const next = nextSelection({
+      visible, order, selected, anchorId, id: page.id, meta, shift: e.shiftKey,
+    });
+    setSelected(next.selected);
+    setAnchorId(next.anchorId);
+  };
+
+  const trashSelection = () => {
+    const ids = selected;
+    setConfirmTrash(false);
+    clearSelection();
+    // Subpages go into the trash with their parents, so the page being read can
+    // be on its way out without being in the selection itself.
+    const activeParent = pages.find((p) => p.id === activePageId)?.parent_id;
+    if (ids.includes(activePageId) || (activeParent && ids.includes(activeParent))) {
+      navigate(`/s/${space.slug}`);
+    }
+    act(async () => {
+      await api.post('/api/pages/delete-many', { pageIds: ids });
+      notifications.show({ message: `Moved ${ids.length} pages to trash` });
+    });
+  };
 
   // ---- dragging ----
 
@@ -243,7 +331,7 @@ export default function PageTree({ space }) {
   const endDrag = useCallback(() => {
     clearHoverTimer();
     dragState.current = null;
-    setDragging(null);
+    setDragging(EMPTY_SET);
     setDropAt(null);
   }, []);
 
@@ -253,7 +341,7 @@ export default function PageTree({ space }) {
     const clear = () => {
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
-      setDragging(null);
+      setDragging(EMPTY_SET);
       setDropAt(null);
     };
     window.addEventListener('dragend', clear);
@@ -265,29 +353,47 @@ export default function PageTree({ space }) {
   }, []);
 
   const onDragStart = (page) => (e) => {
-    // Descendants travel with the page, so they are also the set it can never
-    // be dropped into. Collected up front: the tree that owns them is not
+    // Grabbing a row that is part of the selection picks the whole selection
+    // up, in tree order — which is the order it will be put back down in.
+    const ids = dragPayload(selected, page.id);
+    if (ids.length === 1 && selected.length) clearSelection();
+
+    // Descendants travel with their page, so they are also the set the batch can
+    // never be dropped into. Collected up front: the tree that owns them is not
     // necessarily the tree being dragged over.
-    const descendants = new Set([page.id]);
+    const blockedIds = new Set(ids);
     const walk = (id) => {
       for (const child of childrenOf.get(id) || []) {
-        descendants.add(child.id);
+        blockedIds.add(child.id);
         walk(child.id);
       }
     };
-    walk(page.id);
+    for (const id of ids) walk(id);
 
+    const byId = new Map(pages.map((p) => [p.id, p]));
+    const titles = ids.map((id) => byId.get(id)?.title || 'Untitled');
     dragState.current = {
-      pageId: page.id,
+      pageIds: ids,
       spaceId: space.id,
-      title: page.title || 'Untitled',
-      blockedIds: descendants,
+      titles,
+      // Whether *anything* in the batch is carrying subpages. One flag rather
+      // than a per-page answer, because the whole batch lands in one place and
+      // so is refused or allowed as one.
+      hasChildren: blockedIds.size > ids.length,
+      blockedIds,
     };
-    setDragging(page.id);
+    setDragging(new Set(ids));
     e.dataTransfer.effectAllowed = 'move';
     // A plain-text payload keeps the cursor showing a move rather than the
     // "no drop" badge in browsers that want *some* data on the transfer.
-    e.dataTransfer.setData('text/plain', page.title || 'Untitled');
+    e.dataTransfer.setData('text/plain', titles.join('\n'));
+    if (ids.length > 1) {
+      const ghost = multiDragImage(titles, ids.length);
+      e.dataTransfer.setDragImage(ghost, 24, 22);
+      // The browser has taken its snapshot by the time this runs; leaving the
+      // node in the document would pile up an off-screen stack per drag.
+      setTimeout(() => ghost.remove(), 0);
+    }
   };
 
   // Hovering a collapsed page opens it, so a drop can be aimed at a child
@@ -307,9 +413,8 @@ export default function PageTree({ space }) {
   // can only ever land back at the top level. Refusing during dragover is what
   // shows the "no drop" cursor rather than letting the drop fail after the fact.
   const dropAllowed = (page, zone, drag) => {
-    const dragHasChildren = drag.blockedIds.size > 1;
-    if (zone === 'inside') return !page.parent_id && !dragHasChildren;
-    return !page.parent_id || !dragHasChildren;
+    if (zone === 'inside') return !page.parent_id && !drag.hasChildren;
+    return !page.parent_id || !drag.hasChildren;
   };
 
   const onDragOverRow = (page) => (e) => {
@@ -349,12 +454,13 @@ export default function PageTree({ space }) {
     e.preventDefault();
     e.stopPropagation();
 
+    const moving = new Set(drag.pageIds);
     if (zone === 'inside') {
-      commitMove(drag, { parentId: page.id, index: siblingsWithout(page.id, drag.pageId).length });
+      commitMove(drag, { parentId: page.id, index: siblingsWithout(page.id, moving).length });
       setExpanded((s) => new Set([...s, page.id]));
       return;
     }
-    const siblings = siblingsWithout(page.parent_id, drag.pageId);
+    const siblings = siblingsWithout(page.parent_id, moving);
     const at = siblings.findIndex((s) => s.id === page.id);
     commitMove(drag, {
       parentId: page.parent_id || null,
@@ -377,18 +483,27 @@ export default function PageTree({ space }) {
     const drag = dragState.current;
     if (!drag || !canWrite) return;
     e.preventDefault();
-    commitMove(drag, { parentId: null, index: siblingsWithout(null, drag.pageId).length });
+    commitMove(drag, {
+      parentId: null,
+      index: siblingsWithout(null, new Set(drag.pageIds)).length,
+    });
   };
 
   const commitMove = (drag, { parentId, index }) => {
     endDrag();
     const crossSpace = drag.spaceId !== space.id;
+    const ids = drag.pageIds;
     act(async () => {
-      await api.post(`/api/pages/${drag.pageId}/move`, {
-        parentId,
-        index,
-        spaceId: space.id,
-      });
+      // One page still goes down the single-page endpoint. It is the path every
+      // other way of moving a page uses, and a batch of one has nothing to gain
+      // from the batch endpoint's extra bookkeeping.
+      if (ids.length === 1) {
+        await api.post(`/api/pages/${ids[0]}/move`, { parentId, index, spaceId: space.id });
+      } else {
+        await api.post('/api/pages/move-many', {
+          pageIds: ids, parentId, index, spaceId: space.id,
+        });
+      }
       // A cross-space move empties a slot in a tree this component does not
       // own, so both sides have to be told; same-space moves are covered by the
       // caller's own emit.
@@ -398,6 +513,10 @@ export default function PageTree({ space }) {
 
   const rowDropClass = (pageId) =>
     dropAt?.id === pageId ? `is-drop-${dropAt.zone}` : '';
+
+  // Where each page sits in the pile being carried, so the shuffle animation
+  // can stagger down the stack instead of every row twitching in unison.
+  const dragIndex = useMemo(() => new Map([...dragging].map((id, i) => [id, i])), [dragging]);
 
   const renderNode = (page, depth) => {
     const kids = childrenOf.get(page.id) || [];
@@ -409,6 +528,7 @@ export default function PageTree({ space }) {
     // one — the server enforces the same rule.
     const canNest = !page.parent_id;
     const canBeNested = !page.parent_id && kids.length === 0;
+    const inSelection = selected.length > 1 && selected.includes(page.id);
     const reorder = (index) =>
       act(() => api.post(`/api/pages/${page.id}/move`, { parentId: page.parent_id || null, index }));
 
@@ -421,11 +541,13 @@ export default function PageTree({ space }) {
           className={[
             'gd-tree-row',
             page.id === activePageId ? 'is-active' : '',
-            dragging === page.id ? 'is-dragging' : '',
+            selected.includes(page.id) ? 'is-selected' : '',
+            dragging.has(page.id) ? 'is-dragging' : '',
+            dragging.size > 1 && dragging.has(page.id) ? 'is-jumbling' : '',
             rowDropClass(page.id),
             vim && keyboardFocus && page.id === (cursorId || activePageId) ? 'is-vim-cursor' : '',
           ].filter(Boolean).join(' ')}
-          style={{ paddingLeft: 4 + depth * 14 }}
+          style={{ paddingLeft: 4 + depth * 14, '--jumble-i': dragIndex.get(page.id) ?? 0 }}
           draggable={canWrite}
           onDragStart={canWrite ? onDragStart(page) : undefined}
           onDragEnd={endDrag}
@@ -449,10 +571,7 @@ export default function PageTree({ space }) {
           <UnstyledButton
             className="gd-tree-label"
             title={page.title || 'Untitled'}
-            onClick={() => {
-              setCursorId(page.id);
-              navigate(`/s/${space.slug}/p/${page.id}`);
-            }}
+            onClick={onRowClick(page)}
           >
             <Group gap={6} wrap="nowrap">
               <span className="gd-tree-icon">
@@ -526,15 +645,27 @@ export default function PageTree({ space }) {
                     Move out one level
                   </Menu.Item>
                   <Menu.Divider />
-                  <Menu.Item
-                    color="red" leftSection={<IconTrash size={14} />}
-                    onClick={() => {
-                      if (page.id === activePageId) navigate(`/s/${space.slug}`);
-                      act(() => api.del(`/api/pages/${page.id}`));
-                    }}
-                  >
-                    Move to trash
-                  </Menu.Item>
+                  {/* On a row that is part of a selection, the menu acts on the
+                      selection — trashing just this one out from under a
+                      highlighted group is never what the click meant. */}
+                  {inSelection ? (
+                    <Menu.Item
+                      color="red" leftSection={<IconTrash size={14} />}
+                      onClick={() => setConfirmTrash(true)}
+                    >
+                      Move {selected.length} pages to trash
+                    </Menu.Item>
+                  ) : (
+                    <Menu.Item
+                      color="red" leftSection={<IconTrash size={14} />}
+                      onClick={() => {
+                        if (page.id === activePageId) navigate(`/s/${space.slug}`);
+                        act(() => api.del(`/api/pages/${page.id}`));
+                      }}
+                    >
+                      Move to trash
+                    </Menu.Item>
+                  )}
                 </Menu.Dropdown>
               </Menu>
             </span>
@@ -593,6 +724,44 @@ export default function PageTree({ space }) {
         onlySpace
         topLevelOnly
       />
+      {/* Trashing several pages at once is the one thing here that cannot be
+          undone by dragging them back, so it asks first — and says how many,
+          because the whole risk is a selection being bigger than you thought. */}
+      <Modal
+        opened={confirmTrash} onClose={() => setConfirmTrash(false)}
+        title="Move pages to trash?" centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            {selected.length} pages and their subpages will be moved to the trash.
+            You can restore them from the space’s trash.
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={() => setConfirmTrash(false)}>Cancel</Button>
+            <Button color="red" onClick={trashSelection}>
+              Move {selected.length} pages to trash
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      {canWrite && selected.length > 1 && (
+        <Group className="gd-tree-selbar" gap={4} wrap="nowrap">
+          <Text size="xs" fw={600}>{selected.length} selected</Text>
+          <span style={{ flex: 1 }} />
+          <ActionIcon
+            size="sm" variant="subtle" color="red" title="Move to trash"
+            onClick={() => setConfirmTrash(true)}
+          >
+            <IconTrash size={14} />
+          </ActionIcon>
+          <ActionIcon
+            size="sm" variant="subtle" color="gray" title="Clear selection (Esc)"
+            onClick={clearSelection}
+          >
+            <IconX size={14} />
+          </ActionIcon>
+        </Group>
+      )}
       {roots.map((p) => renderNode(p, 0))}
       {canWrite && (
         <div

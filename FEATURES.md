@@ -62,6 +62,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
 | Nested page tree with reordering | ✅ One level of subpages, drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space. Deeper nesting is tracked as its own feature |
+| Multi-select in the page tree | ✅ ⌘/Ctrl-click to pick pages out, Shift-click for a range. A selection drags as one pile and keeps its order on the drop; trashing one asks first |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |
