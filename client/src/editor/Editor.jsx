@@ -1,5 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Document from '@tiptap/extension-document';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import Table from '@tiptap/extension-table';
@@ -46,6 +47,7 @@ import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
+import { FootnoteExtensions } from './nodes/Footnote.jsx';
 import { VimMode } from './vim/VimMode.js';
 import VimStatus from './vim/VimStatus.jsx';
 import Collaboration from '@tiptap/extension-collaboration';
@@ -58,6 +60,13 @@ import { useContentSnapshot, useSeedContent } from './collab/persistence.js';
 
 const lowlight = createLowlight(common);
 
+// The one schema change footnotes need, and the reason they need no policing.
+// `footnotes?` after `block+`, with the container deliberately left out of the
+// `block` group, is what makes the apparatus a singleton that can only exist as
+// the last thing in the document. Nothing can paste a second one into the
+// middle, because there is no position where the schema would accept it.
+const FootnoteDocument = Document.extend({ content: 'block+ footnotes?' });
+
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
@@ -66,7 +75,11 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // First in the list, and at a higher priority than everything else: in
     // normal mode the keys must not reach the ordinary editing keymap.
     ...(vim ? [VimMode] : []),
+    // Ahead of StarterKit, which has its own Document switched off just below:
+    // this is the same node with room for the footnote container at the end.
+    FootnoteDocument,
     StarterKit.configure({
+      document: false,
       codeBlock: false,
       heading: { levels: [1, 2, 3, 4] },
       // Yjs keeps its own per-user undo stack. Leaving ProseMirror's history
@@ -111,6 +124,7 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    ...FootnoteExtensions,
     FindInPage,
     // Heading anchors plus the §-reference overlay. Pure decoration, so it runs
     // for readers and the public share view exactly as it does for an author.

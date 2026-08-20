@@ -11,13 +11,14 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Rich-text editor (TipTap/ProseMirror) | ✅ Same foundation: TipTap 2 |
 | Markdown paste with auto-formatting | ✅ Pasted markdown converts to rich blocks (tiptap-markdown) |
 | Markdown input shortcuts (`#`, `-`, `1.`, `[ ]`, `>`, ``` ` ``` , `---`, `**bold**`…) | ✅ |
-| Slash command menu (`/`) | ✅ Text, H1–H3, lists, to-do, quote, code, divider, table, image, video, file, callout, toggle, math, Mermaid, Excalidraw, Draw.io, YouTube, iframe embed |
+| Slash command menu (`/`) | ✅ Text, H1–H3, lists, to-do, quote, code, divider, table, image, video, file, callout, toggle, footnote, math, Mermaid, Excalidraw, Draw.io, YouTube, iframe embed |
 | Floating format toolbar on selection | ✅ Bold/italic/underline/strike/code/link/highlight/color/alignment, block type |
 | Tables (resize, row/col ops, header) | ✅ TipTap tables with column resizing and row/col menu |
 | Code blocks with syntax highlighting | ✅ highlight.js via lowlight, language picker |
 | Task lists / to-do | ✅ |
 | Callouts (info/warning/danger/success) | ✅ Custom node |
 | Toggle blocks | ✅ Custom collapsible node |
+| Footnotes | ✅ `/footnote`, `[^` picker or inline `^[text]`. Auto-numbered superscript markers, notes collected at the foot of the page, click to jump, hover to preview, `↩` back-links. Exports and imports as Obsidian/GFM `[^1]` markdown |
 | Math (inline + block, KaTeX) | ✅ KaTeX rendering of `$…$` |
 | Mermaid diagrams | ✅ Live-rendered Mermaid node with code editor |
 | Excalidraw diagrams | ✅ Full Excalidraw editor in a modal, scene stored in the doc |
