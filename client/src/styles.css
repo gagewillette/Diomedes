@@ -273,6 +273,30 @@
   border-radius: 6px; color: var(--mantine-color-dimmed);
 }
 .gd-tree-add:hover { background: var(--mantine-color-default-hover); }
+
+/* ---------- dragging pages around the tree ---------- */
+/* The row keeps its place while it is dragged — pulling it out from under the
+   cursor would move every drop target the moment the drag began. */
+.gd-tree-row.is-dragging { opacity: 0.4; }
+.gd-tree-row[draggable='true'] { cursor: grab; }
+/* Drop hints are drawn as insets rather than borders so a row never changes
+   height mid-drag and nudges the rows below it out from under the cursor. */
+.gd-tree-row.is-drop-before,
+.gd-tree-row.is-drop-after {
+  box-shadow: inset 0 2px 0 0 var(--mantine-color-blue-filled);
+}
+.gd-tree-row.is-drop-after { box-shadow: inset 0 -2px 0 0 var(--mantine-color-blue-filled); }
+/* "Inside" reads as the page swallowing the one being dropped, so it fills
+   rather than draws a line. */
+.gd-tree-row.is-drop-inside {
+  background: var(--mantine-color-blue-light);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+}
+.gd-tree-root-drop { border-radius: 6px; }
+.gd-tree-root-drop.is-drop-root {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  background: var(--mantine-color-blue-light);
+}
 .gd-nav-link {
   display: block; padding: 6px 8px; border-radius: 6px; width: 100%;
 }
@@ -543,4 +567,91 @@
   .gd-pointer-layer,
   .gd-remote-caret,
   .gd-presence { display: none; }
+}
+
+/* ── Vim emulation ──────────────────────────────────────────────────────── */
+
+/* Normal mode sits *on* a character rather than between two, so the caret is
+   drawn as a block over the character under the cursor. */
+.gd-vim-block-cursor {
+  background: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+  border-radius: 1px;
+}
+.gd-editor.gd-vim-normal,
+.gd-editor.gd-vim-visual,
+.gd-editor.gd-vim-command { caret-color: transparent; }
+
+.gd-vim-status {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-dimmed);
+}
+.gd-vim-status.is-insert { color: var(--mantine-color-green-text); }
+.gd-vim-status.is-visual { color: var(--mantine-color-orange-text); }
+.gd-vim-status.is-command { color: var(--mantine-color-text); }
+.gd-vim-mode { font-weight: 700; }
+.gd-vim-pending { margin-left: auto; opacity: 0.75; }
+.gd-vim-message { opacity: 0.9; }
+.gd-vim-cmdline { display: inline-flex; align-items: center; }
+.gd-vim-cmdcaret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 1px;
+  background: currentColor;
+  animation: gd-vim-blink 1s steps(1) infinite;
+}
+@keyframes gd-vim-blink { 50% { opacity: 0; } }
+
+/* The tree cursor. Distinct from .is-active, which marks the page that is
+   actually open — with vim they are often two different rows. */
+.gd-tree:focus { outline: none; }
+.gd-tree.is-vim-focus { box-shadow: inset 2px 0 0 var(--mantine-color-blue-filled); }
+.gd-tree-row.is-vim-cursor {
+  background: var(--mantine-color-default-hover);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  border-radius: 4px;
+}
+
+/* ---- Find in page ---- */
+.gd-findbar {
+  position: fixed;
+  top: 58px;
+  right: 24px;
+  z-index: 300;
+  background: var(--mantine-color-body);
+}
+@media (max-width: 640px) {
+  .gd-findbar { left: 12px; right: 12px; }
+}
+.gd-find-match {
+  background: var(--mantine-color-yellow-3);
+  color: var(--mantine-color-black);
+  border-radius: 2px;
+}
+[data-mantine-color-scheme='dark'] .gd-find-match {
+  background: var(--mantine-color-yellow-8);
+  color: var(--mantine-color-white);
+}
+.gd-find-match-active {
+  background: var(--mantine-color-orange-5);
+  box-shadow: 0 0 0 2px var(--mantine-color-orange-5);
+}
+[data-mantine-color-scheme='dark'] .gd-find-match-active {
+  background: var(--mantine-color-orange-7);
+  box-shadow: 0 0 0 2px var(--mantine-color-orange-7);
+}
+@media print {
+  .gd-findbar { display: none; }
 }

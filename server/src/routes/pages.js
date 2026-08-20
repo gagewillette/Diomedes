@@ -5,6 +5,8 @@ import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '..
 import { searchPages, notePageChanged } from '../search/index.js';
 import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
+import { movePage } from '../lib/pageMove.js';
+import { publish, spaceAudience } from '../lib/events.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -16,28 +18,20 @@ const VERSION_INTERVAL_MIN = 10;
 const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
 
 // The page tree is one level of subpages deep, no more. Lifting that limit is
-// tracked as its own piece of work; until then the rule lives here so no client
-// can get around it.
-//
-// A parent is rejected when it would push the tree past that depth, either
-// because the parent is already a subpage or because the page being moved has
-// subpages of its own that would be dragged down with it.
-async function assertNestingAllowed(parent, page = null) {
-  if (parent.parent_id) {
-    throw httpError(400, 'Pages can only be nested one level deep');
-  }
-  if (page) {
-    const { rows } = await q(
-      'SELECT 1 FROM pages WHERE parent_id = $1 AND deleted_at IS NULL LIMIT 1',
-      [page.id]
-    );
-    if (rows.length) {
-      throw httpError(400, 'A page with subpages cannot itself become a subpage');
-    }
-  }
+// tracked as its own piece of work; until then the rule lives on the server so
+// no client can get around it. The matching rule for *moves* is in movePage,
+// where it can read the same locked rows the move writes.
+function assertCanTakeChildren(parent) {
+  if (parent.parent_id) throw httpError(400, 'Pages can only be nested one level deep');
 }
 
 const accessibleSpacesCTE = accessibleSpacesQuery;
+
+const spaceIdsOfPages = async (pageIds) => {
+  if (!pageIds.length) return [];
+  const { rows } = await q('SELECT DISTINCT space_id FROM pages WHERE id = ANY($1::uuid[])', [pageIds]);
+  return rows.map((r) => r.space_id);
+};
 
 // ---- listing ----
 
@@ -148,7 +142,7 @@ router.post(
     if (parentId) {
       const parent = await getPage(parentId);
       if (parent.space_id !== spaceId) throw httpError(400, 'Parent page is in a different space');
-      await assertNestingAllowed(parent);
+      assertCanTakeChildren(parent);
     }
     const { rows: pos } = await q(
       `SELECT COALESCE(MAX(position), 0) + 1000 AS next FROM pages
@@ -347,34 +341,77 @@ router.get(
   })
 );
 
+// Reparent and/or reorder a page — the endpoint behind drag-and-drop in the
+// sidebar as well as the tree's keyboard/menu commands.
+//
+// `index` is the slot the page should occupy among its new siblings, resolved
+// against the database rather than the dragging browser's copy of the tree: two
+// people rearranging the same list at once both get a sensible result instead of
+// the second one overwriting a position computed from a stale list.
+//
+// A destination `spaceId` moves the page and its whole subtree between spaces,
+// which needs write access on both sides — one to take the page out, one to put
+// it in.
 router.post(
   '/pages/:id/move',
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    const { parentId = null, position } = req.body || {};
-    if (parentId) {
-      const parent = await getPage(parentId);
-      if (parent.space_id !== page.space_id) throw httpError(400, 'Cannot move across spaces');
-      // prevent cycles: walk up from the new parent
-      let cursor = parent;
-      while (cursor) {
-        if (cursor.id === page.id) throw httpError(400, 'Cannot move a page inside itself');
-        cursor = cursor.parent_id ? await getPage(cursor.parent_id) : null;
+    const { parentId = null, spaceId = null, index, position } = req.body || {};
+
+    const targetSpaceId = spaceId || page.space_id;
+    if (targetSpaceId !== page.space_id) await assertSpaceRole(req.user, targetSpaceId, 'writer');
+    if (index !== undefined && index !== null && !Number.isInteger(index)) {
+      throw httpError(400, 'index must be a whole number');
+    }
+
+    const result = await movePage({ page, parentId, spaceId: targetSpaceId, index, position });
+
+    if (result.crossSpace) {
+      // Outside the move's transaction on purpose: this is the same link
+      // resolution an edit runs, reused rather than reimplemented in SQL. It is
+      // idempotent, so the worst a crash in the middle can do is leave some
+      // links resolved against the old space until the page is next saved.
+      //
+      // Each moved page now resolves its own `[[Title]]` links against the new
+      // space, and its title is newly available there to links that were
+      // waiting for a page by that name.
+      for (const movedId of result.movedIds) {
+        const moved = await getPage(movedId);
+        await syncPageLinks(moved.id, moved.content, moved.space_id);
+        await resolveLinksByTitle(moved);
       }
-      await assertNestingAllowed(parent, page);
     }
-    let pos = position;
-    if (pos === undefined || pos === null) {
-      const { rows } = await q(
-        `SELECT COALESCE(MAX(position), 0) + 1000 AS next FROM pages
-         WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL`,
-        [page.space_id, parentId]
-      );
-      pos = rows[0].next;
+
+    // A tree redraw only concerns the space it happened in, so each side is
+    // told about its own space and nothing else.
+    const fromAudience = await spaceAudience(result.fromSpaceId);
+    publish({ type: 'pages-changed', spaceId: result.fromSpaceId, userIds: fromAudience });
+    const toAudience = result.crossSpace ? await spaceAudience(result.toSpaceId) : [];
+    if (result.crossSpace) {
+      publish({ type: 'pages-changed', spaceId: result.toSpaceId, userIds: toAudience });
     }
-    await q('UPDATE pages SET parent_id = $1, position = $2 WHERE id = $3', [parentId, pos, page.id]);
-    res.json({ ok: true });
+
+    // The move reaches further than the two trees. Anyone *reading* a moved
+    // page has stale breadcrumbs and, after a cross-space move, a URL naming
+    // the wrong space. And anyone reading a page that links into the subtree —
+    // which can be a third space entirely — is looking at a link chip whose
+    // cached URL was just rewritten underneath them. Those readers are exactly
+    // the members of the spaces owning the pages that were rewritten, so the
+    // event goes to them and stops there.
+    const linkAudiences = await Promise.all(
+      [...new Set(await spaceIdsOfPages(result.rewrittenIds))].map((id) => spaceAudience(id))
+    );
+    publish({
+      type: 'page-moved',
+      pageIds: result.movedIds,
+      spaceId: result.toSpaceId,
+      spaceSlug: result.spaceSlug,
+      crossSpace: result.crossSpace,
+      userIds: [...new Set([...fromAudience, ...toAudience, ...linkAudiences.flat()])],
+    });
+
+    res.json({ ok: true, spaceId: result.toSpaceId, spaceSlug: result.spaceSlug, position: result.position });
   })
 );
 
