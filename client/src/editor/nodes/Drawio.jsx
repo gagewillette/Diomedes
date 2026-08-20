@@ -3,13 +3,12 @@ import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Button, Modal, Text, Tooltip, useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
-import { DiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 
 const DRAWIO_ORIGIN = 'https://embed.diagrams.net';
 
 function DrawioView({ node, updateAttributes, editor, selected }) {
   const [open, setOpen] = useState(false);
-  const [zoomOpen, setZoomOpen] = useState(false);
   const iframeRef = useRef(null);
   const xmlRef = useRef(node.attrs.xml);
   const colorScheme = useComputedColorScheme('light');
@@ -54,9 +53,12 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     return () => window.removeEventListener('message', onMessage);
   }, [open, node.attrs.xml, updateAttributes]);
 
+  const openZoom = () =>
+    openDiagramLightbox({ key: `drawio-${node.attrs.svg?.slice(0, 64)}`, title: 'draw.io diagram', src: node.attrs.svg });
+
   const zoomHandlers = useZoomClickHandlers({
     editable: editor.isEditable,
-    onZoom: () => setZoomOpen(true),
+    onZoom: openZoom,
     onEdit: () => setOpen(true),
   });
 
@@ -82,7 +84,7 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
               size="sm"
               variant="light"
               aria-label="Open diagram full screen"
-              onClick={() => setZoomOpen(true)}
+              onClick={openZoom}
             >
               <IconZoomScan size={14} />
             </ActionIcon>
@@ -94,12 +96,6 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
           </Button>
         )}
       </div>
-      <DiagramLightbox
-        opened={zoomOpen}
-        onClose={() => setZoomOpen(false)}
-        title="draw.io diagram"
-        src={node.attrs.svg}
-      />
       <Modal
         opened={open}
         onClose={close}

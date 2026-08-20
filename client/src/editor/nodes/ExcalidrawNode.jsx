@@ -4,7 +4,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { ActionIcon, Button, Modal, Group, Loader, Center, Text, Tooltip } from '@mantine/core';
 import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
-import { DiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 
 const ExcalidrawCanvas = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({
@@ -23,7 +23,6 @@ const ExcalidrawCanvas = lazy(() =>
 
 function ExcalidrawView({ node, updateAttributes, editor, selected }) {
   const [open, setOpen] = useState(false);
-  const [zoomOpen, setZoomOpen] = useState(false);
   const previewRef = useRef(null);
   const apiRef = useRef(null);
   const colorScheme = useComputedColorScheme('light');
@@ -86,9 +85,12 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
     close();
   };
 
+  const openZoom = () =>
+    openDiagramLightbox({ key: `excalidraw-${(data.elements || []).length}-${colorScheme}`, title: 'Drawing', renderNode: exportSvg });
+
   const zoomHandlers = useZoomClickHandlers({
     editable: editor.isEditable,
-    onZoom: () => setZoomOpen(true),
+    onZoom: openZoom,
     onEdit: () => setOpen(true),
   });
 
@@ -108,7 +110,7 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
               size="sm"
               variant="light"
               aria-label="Open drawing full screen"
-              onClick={() => setZoomOpen(true)}
+              onClick={openZoom}
             >
               <IconZoomScan size={14} />
             </ActionIcon>
@@ -120,12 +122,6 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
           </Button>
         )}
       </div>
-      <DiagramLightbox
-        opened={zoomOpen}
-        onClose={() => setZoomOpen(false)}
-        title="Drawing"
-        renderNode={exportSvg}
-      />
       <Modal
         opened={open}
         onClose={save}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Textarea, Button, Group, Text, Tooltip } from '@mantine/core';
 import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
-import { DiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 
 let mermaidPromise = null;
 let renderCounter = 0;
@@ -19,12 +19,16 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
-  const [zoomOpen, setZoomOpen] = useState(false);
   const [draft, setDraft] = useState(node.attrs.code);
   const colorScheme = useComputedColorScheme('light');
   const alive = useRef(true);
 
-  useEffect(() => () => { alive.current = false; }, []);
+  // remount has to revive the flag — StrictMode runs mount/cleanup/mount, and a
+  // flag left false there would silently swallow every later render
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +53,11 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
     setTimeout(() => editor.commands.focus(), 0);
   };
 
+  const openZoom = () => openDiagramLightbox({ key: `mermaid-${node.attrs.code}`, title: 'Mermaid diagram', html: svg });
+
   const zoomHandlers = useZoomClickHandlers({
     editable: editor.isEditable,
-    onZoom: () => setZoomOpen(true),
+    onZoom: () => openZoom(),
     onEdit: () => { setDraft(node.attrs.code); setEditing(true); },
   });
 
@@ -75,7 +81,7 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
               size="sm"
               variant="light"
               aria-label="Open diagram full screen"
-              onClick={() => setZoomOpen(true)}
+              onClick={openZoom}
             >
               <IconZoomScan size={14} />
             </ActionIcon>
@@ -88,12 +94,6 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
           </Button>
         )}
       </div>
-      <DiagramLightbox
-        opened={zoomOpen}
-        onClose={() => setZoomOpen(false)}
-        title="Mermaid diagram"
-        html={svg}
-      />
       {editing && (
         <div className="gd-mermaid-editor">
           <Textarea
