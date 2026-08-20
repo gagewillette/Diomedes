@@ -1,0 +1,119 @@
+# Staging deployment for Diomedes. Copy to docker-compose.staging.yml on the
+# host (or keep this name) and run alongside the prod stack from
+# docker-compose.example.yml -> docker-compose.yml. Same .env as prod on
+# purpose (POSTGRES_USER/PASSWORD/APP_SECRET etc.) — this stack has its own
+# db/redis containers and its own volumes, so there is no credential sharing
+# with the live prod database, just less to keep in sync by hand.
+#
+#   cp docker-compose.staging.yml docker-compose.staging.yml   # if renaming
+#   docker compose -f docker-compose.staging.yml up -d
+#
+# The image is pulled from GHCR at the `stage` tag — staging-publish.yml
+# rebuilds and pushes it on every merge into the `staging` branch. Watchtower
+# is NOT started here: reuse the one instance from the prod stack (it already
+# polls --label-enable, so it picks up any container carrying the
+# watchtower.enable label, prod or staging, regardless of which compose file
+# started it). Don't run a second watchtower against the same docker.sock.
+
+services:
+  diomedes:
+    image: ghcr.io/gagewillette/diomedes:stage
+    container_name: diomedes-staging
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+        required: false
+    env_file:
+      - .env
+    environment:
+      APP_URL: "https://stg-docs.gageserver.net"
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379"
+      STORAGE_PATH: /app/data/storage
+    ports:
+      - "3001:3000"
+    volumes:
+      - app-data-staging:/app/data/storage
+    labels:
+      # Opt this container in to the prod stack's watchtower.
+      com.centurylinklabs.watchtower.enable: "true"
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: diomedes-staging-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db-data-staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  redis:
+    image: redis:7.4.10-alpine
+    container_name: diomedes-staging-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data-staging:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  # Same optional embedding server as prod, gated by the same COMPOSE_PROFILES
+  # var in the shared .env. Leave the profile off unless staging also needs
+  # semantic search.
+  ollama:
+    image: ollama/ollama:0.32.14
+    container_name: diomedes-staging-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_KEEP_ALIVE: 60m
+    volumes:
+      - ollama-models-staging:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        /bin/ollama serve &
+        pid=$$!
+        until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+        if /bin/ollama show "$$EMBEDDING_MODEL" >/dev/null 2>&1; then
+          echo "ollama: $$EMBEDDING_MODEL already present"
+        else
+          echo "ollama: pulling $$EMBEDDING_MODEL — first run only, a few hundred MB"
+          until /bin/ollama pull "$$EMBEDDING_MODEL"; do
+            echo "ollama: pull failed, retrying in 10s"
+            sleep 10
+          done
+        fi
+        touch /tmp/model-ready
+        wait $$pid
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/model-ready && ollama list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  app-data-staging:
+  db-data-staging:
+  redis-data-staging:
+  ollama-models-staging:
