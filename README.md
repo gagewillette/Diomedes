@@ -43,7 +43,7 @@ in [FEATURES.md](FEATURES.md).
 diomedes/
 ├── client/            # React SPA (Vite, Mantine UI, TipTap editor)
 ├── server/            # Express API (ESM, no build step)
-├── scripts/release.sh # tags a release; GitHub Actions builds & publishes
+├── scripts/           # bump-version.sh (versioning), release.sh (manual release)
 ├── Dockerfile         # multi-stage: build client → install server deps → runtime
 └── docker-compose.example.yml  # diomedes + postgres + redis + watchtower
 ```
