@@ -8,6 +8,7 @@ import {
   IconBrandYoutube, IconWorld, IconCalendar, IconTopologyStar3, IconFileTypePdf, IconSuperscript,
 } from '@tabler/icons-react';
 import { makeSuggestionRender } from './suggestionRender.js';
+import { focusBelowDiagram } from './diagramFlow.js';
 import { requestDiagramEditor } from './nodes/diagramAutoOpen.js';
 
 const pickFile = (accept) =>
@@ -18,6 +19,30 @@ const pickFile = (accept) =>
     input.onchange = () => resolve(input.files[0] || null);
     input.click();
   });
+
+/**
+ * Insert a diagram block and leave the caret on a line underneath it.
+ *
+ * A diagram is an atom: there is no text position inside one, so the selection
+ * `insertContent` leaves behind is the node itself and the author has nothing
+ * to type on. `focusBelowDiagram` moves them down onto the paragraph that
+ * follows — reusing the empty one the slash command left behind rather than
+ * stacking a second blank line under every diagram, and creating one only when
+ * the diagram would otherwise be the last thing in the document.
+ */
+function insertDiagram(editor, range, node) {
+  if (!editor.chain().focus().deleteRange(range).insertContent(node).run()) return false;
+
+  // insertContent leaves the selection on, or immediately after, what it put in.
+  const sel = editor.state.selection;
+  let pos = null;
+  if (sel.node?.type.name === node.type) pos = sel.from;
+  else if (sel.$from.nodeBefore?.type.name === node.type) pos = sel.from - sel.$from.nodeBefore.nodeSize;
+  if (pos == null) return true;
+
+  focusBelowDiagram(editor, () => pos);
+  return true;
+}
 
 export function buildSlashItems({ uploadFile, uploadDocument }) {
   const items = [
@@ -53,21 +78,23 @@ export function buildSlashItems({ uploadFile, uploadDocument }) {
         type: 'callout', attrs: { variant: 'info' }, content: [{ type: 'paragraph' }],
       }).run() },
     { title: 'Mermaid diagram', desc: 'Flowcharts, sequence diagrams…', icon: IconChartDots3, kw: 'diagram flowchart chart graph',
-      run: (e, r) => e.chain().focus().deleteRange(r).insertContent({
+      run: (e, r) => insertDiagram(e, r, {
         type: 'mermaidDiagram',
         attrs: { code: 'graph TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[Do it]\n  B -->|No| D[Skip]' },
-      }).run() },
+      }) },
     { title: 'Excalidraw', desc: 'Free-form whiteboard drawing', icon: IconPencil, kw: 'draw sketch whiteboard diagram',
       run: (e, r) => {
+        // The editor opens on the node view that is about to mount; the request
+        // is held in memory rather than on the node — see diagramAutoOpen.js.
         requestDiagramEditor('excalidraw');
-        e.chain().focus().deleteRange(r).insertContent({
+        return insertDiagram(e, r, {
           type: 'excalidraw', attrs: { data: { elements: [], appState: {}, files: {} } },
-        }).run();
+        });
       } },
     { title: 'Draw.io diagram', desc: 'Full diagrams.net editor', icon: IconTopologyStar3, kw: 'drawio diagrams.net flowchart uml network',
       run: (e, r) => {
         requestDiagramEditor('drawioDiagram');
-        e.chain().focus().deleteRange(r).insertContent({ type: 'drawioDiagram' }).run();
+        return insertDiagram(e, r, { type: 'drawioDiagram' });
       } },
     { title: 'Math', desc: 'Inline LaTeX: $E = mc^2$', icon: IconMathFunction, kw: 'latex katex equation formula',
       run: (e, r) => e.chain().focus().deleteRange(r).insertContent('$E = mc^2$ ').run() },

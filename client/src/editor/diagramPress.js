@@ -5,9 +5,9 @@
  *
  * The click that brings a page back to the front is delivered to whatever sits
  * under the pointer. On a page that is nothing but a diagram that is the
- * diagram itself, so clicking back into the tab threw the reader into the
- * full-screen diagram — as though they had asked to open it. The first press
- * after the page loses focus is a press that focuses the page, and that is all.
+ * diagram itself, so clicking back into the tab acted on the diagram — opening
+ * it full screen, or opening its editor. The first press after the page loses
+ * focus is a press that focuses the page, and that is all.
  *
  * `MouseEvent.detail`, the browser's own click counter, is no way to tell a
  * double press from a single one either: that counter belongs to the window and

@@ -1,4 +1,4 @@
-import { Node } from '@tiptap/core';
+import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { ActionIcon, Text, Tooltip } from '@mantine/core';
 import { IconDownload, IconEye, IconFileTypePdf, IconPresentation } from '@tabler/icons-react';
@@ -121,10 +121,12 @@ export const DocumentBlock = Node.create({
     ];
   },
 
-  renderHTML({ node }) {
+  renderHTML({ node, HTMLAttributes }) {
+    // Same reason as the diagram nodes: HTMLAttributes carries the global block
+    // id, and an attachment that loses its id on save stops being addressable.
     return [
       'div',
-      {
+      mergeAttributes(HTMLAttributes, {
         'data-type': 'document',
         'data-attachment-id': node.attrs.attachmentId,
         'data-url': node.attrs.url,
@@ -132,7 +134,7 @@ export const DocumentBlock = Node.create({
         'data-mime': node.attrs.mime,
         'data-size': String(node.attrs.size || 0),
         'data-kind': node.attrs.kind,
-      },
+      }),
     ];
   },
 

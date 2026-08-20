@@ -1,13 +1,14 @@
-import { Node } from '@tiptap/core';
+import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Button, Loader, Modal, Text, Tooltip, useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 import { DRAWIO_ORIGIN, renderDrawioXml } from '../drawioRender.js';
+import { focusBelowDiagram, selectDiagramNode } from '../diagramFlow.js';
 import { claimDiagramEditor } from './diagramAutoOpen.js';
 
-function DrawioView({ node, updateAttributes, editor, selected }) {
+function DrawioView({ node, updateAttributes, editor, selected, getPos }) {
   const [open, setOpen] = useState(false);
   const [rendered, setRendered] = useState('');
   const [renderError, setRenderError] = useState(null);
@@ -59,6 +60,13 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     setTimeout(() => editor.commands.focus(), 0);
   };
 
+  // Saving is the end of the diagram, not the start of typing in it: an atom
+  // has no interior, so the caret goes to a fresh line underneath.
+  const closeAfterSave = () => {
+    setOpen(false);
+    setTimeout(() => focusBelowDiagram(editor, getPos), 0);
+  };
+
   useEffect(() => {
     if (!open) return;
     const onMessage = (event) => {
@@ -77,14 +85,14 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
         post({ action: 'export', format: 'xmlsvg' }); // svg with the xml embedded, used as preview
       } else if (msg.event === 'export') {
         updateAttributes({ xml: msg.xml || xmlRef.current, svg: msg.data });
-        close();
+        closeAfterSave();
       } else if (msg.event === 'exit') {
         close();
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [open, xml, updateAttributes]);
+  }, [open, xml, updateAttributes, getPos]);
 
   const openZoom = () =>
     openDiagramLightbox({ key: `drawio-${preview?.slice(0, 64)}`, title: 'draw.io diagram', src: preview });
@@ -93,6 +101,7 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
     editable: editor.isEditable,
     onZoom: openZoom,
     onEdit: () => setOpen(true),
+    onSelect: () => selectDiagramNode(editor, getPos),
   });
 
   const src = `${DRAWIO_ORIGIN}/?embed=1&proto=json&spin=1&ui=${colorScheme === 'dark' ? 'dark' : 'atlas'}&saveAndExit=1&noSaveBtn=0&noExitBtn=0`;
@@ -167,7 +176,15 @@ function DrawioView({ node, updateAttributes, editor, selected }) {
 export const DrawioBlock = Node.create({
   name: 'drawioDiagram',
   group: 'block',
+  // `atom` is the whole "a diagram holds a diagram and nothing else" rule: the
+  // schema gives the node no content expression, so there is no position inside
+  // one where a stray character could ever be typed or pasted.
   atom: true,
+  // Selectable so it can be copied as a block, draggable so the copy can be
+  // dropped somewhere. Each paste is a fresh node with its own attributes and
+  // (via blockId.js) its own id, so editing one copy leaves the others alone.
+  selectable: true,
+  draggable: true,
   addAttributes() {
     return {
       xml: { default: '' },
@@ -182,8 +199,18 @@ export const DrawioBlock = Node.create({
       },
     ];
   },
-  renderHTML({ node }) {
-    return ['div', { 'data-type': 'drawio', 'data-xml': node.attrs.xml, 'data-svg': node.attrs.svg }];
+  renderHTML({ node, HTMLAttributes }) {
+    // HTMLAttributes carries the global block id. Dropping it here — as this
+    // did — meant a diagram lost its identity on every HTML round trip, so a
+    // copy and its original were indistinguishable to anything downstream.
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'drawio',
+        'data-xml': node.attrs.xml,
+        'data-svg': node.attrs.svg,
+      }),
+    ];
   },
   addNodeView() {
     return ReactNodeViewRenderer(DrawioView);

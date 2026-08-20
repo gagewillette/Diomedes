@@ -26,6 +26,8 @@ import { usePeers } from '../editor/collab/presence.js';
 import { pickUserColor } from '../lib/userColor.js';
 import BacklinksPanel from '../components/BacklinksPanel.jsx';
 import PagePicker from '../components/PagePicker.jsx';
+import Emoji from '../components/Emoji.jsx';
+import IconPickerModal from '../components/IconPickerModal.jsx';
 import { onFocusEditor, onRequestSave } from '../lib/vimFocus.js';
 
 export default function PageEditor() {
@@ -40,6 +42,7 @@ export default function PageEditor() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
   const saveTimer = useRef(null);
@@ -205,9 +208,8 @@ export default function PageEditor() {
     setIsFavorite(!isFavorite);
   };
 
-  const setIcon = () => {
-    const icon = window.prompt('Page icon (emoji, empty to clear)', data.page.icon || '');
-    if (icon === null) return;
+  const applyIcon = (icon) => {
+    setIconOpen(false);
     api.patch(`/api/pages/${pageId}`, { title, icon }).then(() => {
       setLoaded((d) => ({ ...d, page: { ...d.page, icon } }));
       emitPagesChanged(data.page.space_id);
@@ -277,11 +279,13 @@ export default function PageEditor() {
       <Group justify="space-between" py={8} className="gd-page-topbar" wrap="nowrap">
         <Breadcrumbs separator="›" styles={{ separator: { opacity: 0.5 } }}>
           <Anchor component={Link} to={`/s/${slug}`} size="sm" c="dimmed">
-            {data.space.icon} {data.space.name}
+            <Emoji char={data.space.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+            {data.space.name}
           </Anchor>
           {data.breadcrumbs.map((b) => (
             <Anchor key={b.id} component={Link} to={`/s/${slug}/p/${b.id}`} size="sm" c="dimmed">
-              {b.icon} {b.title || 'Untitled'}
+              <Emoji char={b.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+              {b.title || 'Untitled'}
             </Anchor>
           ))}
           <Text size="sm">{title || 'Untitled'}</Text>
@@ -341,8 +345,8 @@ export default function PageEditor() {
             </Menu.Target>
             <Menu.Dropdown>
               {canWrite && (
-                <Menu.Item leftSection={<IconMoodSmile size={14} />} onClick={setIcon}>
-                  Change icon
+                <Menu.Item leftSection={<IconMoodSmile size={14} />} onClick={() => setIconOpen(true)}>
+                  {data.page.icon ? 'Change icon' : 'Set icon'}
                 </Menu.Item>
               )}
               {canWrite && (
@@ -382,10 +386,12 @@ export default function PageEditor() {
       <Container size={WIDTH_TO_CONTAINER[preferences.editorWidth] || 'md'} px="lg" pb={120} className="gd-fade-in">
         <Group gap={8} mt="xl" mb={4} wrap="nowrap" align="flex-start">
           {data.page.icon && (
-            <Text style={{ fontSize: 38, lineHeight: 1.2, cursor: canWrite ? 'pointer' : 'default' }}
-              onClick={canWrite ? setIcon : undefined}>
-              {data.page.icon}
-            </Text>
+            <Emoji
+              char={data.page.icon}
+              size={40}
+              style={{ marginTop: 4, cursor: canWrite ? 'pointer' : 'default' }}
+              onClick={canWrite ? () => setIconOpen(true) : undefined}
+            />
           )}
           <TextInput
             value={title}
@@ -434,6 +440,11 @@ export default function PageEditor() {
         rootLabel="No parent (top level)"
         onlySpace
         topLevelOnly
+      />
+      <IconPickerModal
+        page={iconOpen ? { ...data.page, title } : null}
+        onClose={() => setIconOpen(false)}
+        onPick={applyIcon}
       />
       <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <HistoryModal

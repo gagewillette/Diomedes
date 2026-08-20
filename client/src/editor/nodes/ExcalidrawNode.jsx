@@ -1,10 +1,11 @@
-import { Node } from '@tiptap/core';
+import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { ActionIcon, Button, Modal, Group, Loader, Center, Text, Tooltip } from '@mantine/core';
 import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
+import { focusBelowDiagram, selectDiagramNode } from '../diagramFlow.js';
 import { claimDiagramEditor } from './diagramAutoOpen.js';
 
 const ExcalidrawCanvas = lazy(() =>
@@ -22,7 +23,7 @@ const ExcalidrawCanvas = lazy(() =>
   }))
 );
 
-function ExcalidrawView({ node, updateAttributes, editor, selected }) {
+function ExcalidrawView({ node, updateAttributes, editor, selected, getPos }) {
   const [open, setOpen] = useState(false);
   const previewRef = useRef(null);
   const apiRef = useRef(null);
@@ -75,15 +76,19 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
     const api = apiRef.current;
     if (api) {
       const appState = api.getAppState();
+      // A whole new scene object every save, never a mutation of the one on the
+      // node: two copies of a drawing must not end up sharing state.
       updateAttributes({
         data: {
-          elements: api.getSceneElements(),
+          elements: [...api.getSceneElements()],
           appState: { viewBackgroundColor: appState.viewBackgroundColor },
-          files: api.getFiles(),
+          files: { ...api.getFiles() },
         },
       });
     }
-    close();
+    setOpen(false);
+    // Finished drawing means finished with this block — land on a new line.
+    setTimeout(() => focusBelowDiagram(editor, getPos), 0);
   };
 
   const openZoom = () =>
@@ -93,6 +98,7 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
     editable: editor.isEditable,
     onZoom: openZoom,
     onEdit: () => setOpen(true),
+    onSelect: () => selectDiagramNode(editor, getPos),
   });
 
   return (
@@ -158,7 +164,13 @@ function ExcalidrawView({ node, updateAttributes, editor, selected }) {
 export const ExcalidrawBlock = Node.create({
   name: 'excalidraw',
   group: 'block',
+  // No content expression: the block is the drawing and nothing else can be
+  // typed or pasted inside it.
   atom: true,
+  // Selectable and draggable so a drawing can be copied as a block. Every paste
+  // is a distinct node with its own scene object and its own block id.
+  selectable: true,
+  draggable: true,
   addAttributes() {
     return {
       data: { default: { elements: [], appState: {}, files: {} } },
@@ -178,8 +190,16 @@ export const ExcalidrawBlock = Node.create({
       },
     ];
   },
-  renderHTML({ node }) {
-    return ['div', { 'data-type': 'excalidraw', 'data-scene': JSON.stringify(node.attrs.data) }];
+  renderHTML({ node, HTMLAttributes }) {
+    // Merging HTMLAttributes keeps the global block id on the element, so the
+    // block survives the HTML round trip with its identity intact.
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'excalidraw',
+        'data-scene': JSON.stringify(node.attrs.data),
+      }),
+    ];
   },
   addNodeView() {
     return ReactNodeViewRenderer(ExcalidrawView);

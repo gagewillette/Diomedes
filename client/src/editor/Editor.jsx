@@ -41,6 +41,7 @@ import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { FindInPage } from './FindInPage.js';
 import { BlockId } from './blockId.js';
+import { TrailingNode } from './trailingNode.js';
 import { BlockDrag } from './blockDrag.js';
 import { SectionRef } from './SectionRef.js';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
@@ -146,6 +147,10 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // global attributes are applied to the types they name once the whole
     // extension set is resolved, so DocumentBlock below is covered too.
     BlockId,
+    // Keeps an empty paragraph under a document that would otherwise end in a
+    // block you cannot type in — a diagram, an image, a divider. Without it the
+    // caret has nowhere to go and the page reads as frozen.
+    TrailingNode,
     // The hover handle and Alt+Shift+Arrow. Only for someone who can actually
     // edit: offering a reader a grip that cannot move anything is worse than
     // offering nothing.
