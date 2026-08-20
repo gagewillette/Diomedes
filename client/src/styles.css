@@ -151,6 +151,11 @@ body.gd-block-drag-active {
 /* Link color is for prose links only — buttons rendered as anchors (the
    document card download button) keep their own Mantine color. */
 .gd-editor a:not(.mantine-ActionIcon-root) { color: var(--mantine-color-blue-6); }
+
+/* An in-page `[text](#slug)` link jumps to the heading it names, so it wants a
+   link's cursor rather than the caret contenteditable gives every other run of
+   text. Alt-click still places the caret, for editing the link's own words. */
+.gd-editor a[href^='#'] { cursor: pointer; }
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
