@@ -46,6 +46,9 @@ export default function PageEditor() {
   const [iconOpen, setIconOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const editorRef = useRef(null);
+  // Whether a cursor has been placed in the document since this page opened —
+  // see the Ctrl+L handler below.
+  const touched = useRef(false);
   const saveTimer = useRef(null);
   const titleTimer = useRef(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -189,7 +192,18 @@ export default function PageEditor() {
 
   // Ctrl+L from anywhere, and `:w` from the editor's own command line.
   useEffect(() => {
-    const offFocus = onFocusEditor(() => editorRef.current?.commands.focus());
+    const offFocus = onFocusEditor(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      // A page opened from the tree has never had a cursor put in it. Plain
+      // `focus()` restores the selection the document already carries, and for
+      // a collaborative document that is wherever the CRDT sync left it — the
+      // very end — so Ctrl+L into a page you just opened dropped you at the
+      // bottom of it. Land at the top the first time; once the cursor has been
+      // somewhere, Ctrl+L goes back to where you left it.
+      if (touched.current) editor.commands.focus();
+      else editor.commands.focus('start');
+    });
     const offSave = onRequestSave(() => {
       clearTimeout(saveTimer.current);
       saveContent(editorRef.current);
@@ -428,7 +442,14 @@ export default function PageEditor() {
           onSaveState={setSaveState}
           space={data.space}
           onUpdate={onEditorUpdate}
-          onReady={(editor) => { editorRef.current = editor; }}
+          onReady={(editor) => {
+            editorRef.current = editor;
+            // A fresh editor per page — the key above sees to that — so the
+            // "has the cursor been anywhere" flag resets with it, and a click
+            // into the document counts as much as a Ctrl+L does.
+            touched.current = false;
+            editor.on('focus', () => { touched.current = true; });
+          }}
         />
         <BacklinksPanel pageId={pageId} spaceId={data.page.space_id} />
       </Container>

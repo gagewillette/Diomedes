@@ -117,6 +117,25 @@ const isTextblock = ($p) => $p.parent.isTextblock;
 const lineStart = ($p) => (isTextblock($p) ? $p.start() : $p.pos);
 const lineEnd = ($p) => (isTextblock($p) ? $p.end() : $p.pos);
 
+/**
+ * The nearest position a text cursor can actually occupy, searching in `dir`.
+ *
+ * The gap around a block that holds no text — a divider, an image, a diagram —
+ * belongs to no line, and every motion here ends up in `moveTo`, which resolves
+ * what it is given *forwards*. Going down that is harmless: forwards is where
+ * you were headed anyway. Going up it silently undid the move, handing back the
+ * top of the block you were leaving, so `k` under a divider read as a dead key
+ * however many times you pressed it. Searching text-only in the direction of
+ * travel steps over such a block to the last line above it, which is the mirror
+ * of what `j` already does going down.
+ */
+export function textNear(doc, pos, dir) {
+  const $p = doc.resolve(clamp(pos, doc));
+  if (isTextblock($p)) return $p.pos;
+  const found = Selection.findFrom($p, dir, true) || Selection.findFrom($p, -dir, true);
+  return found ? found.head : Selection.near($p, dir).head;
+}
+
 function firstNonBlank(doc, $p) {
   const start = lineStart($p);
   const end = lineEnd($p);
@@ -225,11 +244,7 @@ function verticalMove(view, pos, dir, goalLeft) {
 
   // A boundary between blocks is not a place the cursor can sit; take the
   // nearest text position on the side we are heading towards.
-  const snap = (p) => {
-    const $p = doc.resolve(clamp(p, doc));
-    if (isTextblock($p)) return $p.pos;
-    return Selection.near($p, dir).head;
-  };
+  const snap = (p) => textNear(doc, p, dir);
 
   let y = dir > 0 ? coords.bottom + step : coords.top - step;
   for (let i = 0; i < 48; i += 1) {
@@ -274,8 +289,7 @@ function blockMove(state, pos, dir) {
   const edge = dir > 0 ? $pos.after($pos.depth) : $pos.before($pos.depth);
   const probe = dir > 0 ? edge + 1 : edge - 1;
   if (probe < 0 || probe > doc.content.size) return null;
-  const near = Selection.near(doc.resolve(clamp(probe, doc)), dir);
-  const $to = near.$head;
+  const $to = doc.resolve(textNear(doc, probe, dir));
   if (!isTextblock($to)) return $to.pos;
   return Math.min($to.start() + col, $to.end());
 }
