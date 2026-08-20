@@ -8,6 +8,7 @@ import { notifications } from '@mantine/notifications';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { WORKSPACE_NAME_MAX } from '../lib/workspace.js';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 
 /**
  * Workspace-wide settings. Unlike /settings (which is per-account), everything
@@ -18,6 +19,7 @@ export default function WorkspaceSettings() {
     workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance,
     updateWorkspaceName, isAdmin,
   } = useAuth();
+  useDocumentIdentity(`${workspaceName} settings`, '⚙️');
   const [saving, setSaving] = useState(null);
   // The slider is dragged locally and only written on release; every drag step
   // would otherwise be a PATCH and an SSE fan-out to every browser.
