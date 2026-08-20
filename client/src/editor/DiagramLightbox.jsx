@@ -256,33 +256,49 @@ export function DiagramLightboxHost() {
 }
 
 /**
- * Click opens the zoom viewer, double-click opens the editor (when editable).
- * A short delay lets the double-click win over the single click. The timer is
- * module-level on purpose — a node view re-drawn by the click must not cancel
- * the zoom it just asked for.
+ * What a click on a diagram preview means, which is not the same thing for a
+ * reader and for an author.
+ *
+ * For a reader there is only one useful gesture, so a click enlarges the
+ * diagram — that is all a read-only page can offer.
+ *
+ * For an author a click has to mean *select this block*. A diagram is an atom
+ * rendered inside a `contenteditable="false"` node view: without a selection
+ * gesture there is no way to put one on the clipboard, and "copy a diagram so
+ * the same picture appears twice" has no answer. Enlarging stays one click
+ * away on the magnifier button, and double-click still opens the editor.
  *
  * Everything hangs off mousedown, in the capture phase: pressing on a diagram
  * makes ProseMirror select the node and rebuild its DOM, so by the time a
  * bubbled mousedown (let alone the click that would follow) reaches React, the
- * element it was aimed at is gone and the handler never runs.
+ * element it was aimed at is gone and the handler never runs. The timer is
+ * module-level for the same reason — a node view re-drawn by the click must
+ * not cancel the work it just asked for.
+ *
+ * Nothing here calls preventDefault: suppressing the default mousedown would
+ * also suppress the drag that `draggable: true` node views start from it.
  */
 let clickTimer = null;
 
-export function useZoomClickHandlers({ editable, onZoom, onEdit }) {
-  const zoom = () => {
+export function useZoomClickHandlers({ editable, onZoom, onEdit, onSelect }) {
+  // The delay only exists to let a double-click beat the single click that
+  // precedes it. Selecting is idempotent and instant, so it needs no delay.
+  const single = () => {
     clearTimeout(clickTimer);
-    clickTimer = setTimeout(onZoom, editable ? 220 : 0);
+    if (editable) onSelect?.();
+    else clickTimer = setTimeout(onZoom, 0);
   };
   return {
-    style: { cursor: 'zoom-in' },
+    style: { cursor: editable ? 'pointer' : 'zoom-in' },
     onMouseDownCapture: (e) => {
       if (e.button !== 0) return;
       if (e.detail > 1) {
         clearTimeout(clickTimer);
         if (editable) onEdit?.();
+        else onZoom?.();
         return;
       }
-      zoom();
+      single();
     },
   };
 }

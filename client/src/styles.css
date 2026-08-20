@@ -265,6 +265,12 @@
 }
 .gd-mermaid:hover, .gd-excalidraw:hover { border-color: var(--mantine-color-default-border); }
 .gd-mermaid.is-selected, .gd-excalidraw.is-selected { border-color: var(--mantine-color-blue-5); }
+/* A selected diagram is a block on the clipboard, not just a hovered one — the
+   tint says so plainly enough that copy/paste is a gesture people find. */
+.gd-mermaid.is-selected, .gd-excalidraw.is-selected, .gd-drawio.is-selected {
+  box-shadow: 0 0 0 2px var(--mantine-color-blue-5);
+  background: var(--mantine-color-blue-light);
+}
 .gd-mermaid-preview { display: flex; justify-content: center; cursor: default; }
 .gd-mermaid-preview svg { max-width: 100%; }
 .gd-node-edit-btn {

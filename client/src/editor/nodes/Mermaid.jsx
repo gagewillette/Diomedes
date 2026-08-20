@@ -1,4 +1,4 @@
-import { Node } from '@tiptap/core';
+import { Node, mergeAttributes } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Textarea, Button, Group, Text, Tooltip } from '@mantine/core';
@@ -6,6 +6,7 @@ import { useComputedColorScheme } from '@mantine/core';
 import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 import { nextRenderId, removeRenderScratch } from '../../lib/mermaidRender.js';
+import { focusBelowDiagram, selectDiagramNode } from '../diagramFlow.js';
 
 let mermaidPromise = null;
 async function getMermaid(dark) {
@@ -15,7 +16,7 @@ async function getMermaid(dark) {
   return mermaid;
 }
 
-function MermaidView({ node, updateAttributes, editor, selected }) {
+function MermaidView({ node, updateAttributes, editor, selected, getPos }) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -51,7 +52,9 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
   const save = () => {
     updateAttributes({ code: draft });
     setEditing(false);
-    setTimeout(() => editor.commands.focus(), 0);
+    // A saved diagram is finished: hand the author a fresh line under it rather
+    // than a selected atom they cannot type into.
+    setTimeout(() => focusBelowDiagram(editor, getPos), 0);
   };
 
   const openZoom = () => openDiagramLightbox({ key: `mermaid-${node.attrs.code}`, title: 'Mermaid diagram', html: svg });
@@ -60,6 +63,7 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
     editable: editor.isEditable,
     onZoom: () => openZoom(),
     onEdit: () => { setDraft(node.attrs.code); setEditing(true); },
+    onSelect: () => selectDiagramNode(editor, getPos),
   });
 
   return (
@@ -119,15 +123,24 @@ function MermaidView({ node, updateAttributes, editor, selected }) {
 export const MermaidDiagram = Node.create({
   name: 'mermaidDiagram',
   group: 'block',
+  // No content expression at all: a diagram block holds its diagram and has no
+  // position inside it where anything else could be typed or pasted.
   atom: true,
+  // Selectable and draggable so the block can be copied and the copy dropped.
+  // Attributes are per-node and blockId.js renames a colliding id, so the two
+  // copies drift apart the moment one of them is edited.
+  selectable: true,
+  draggable: true,
   addAttributes() {
     return { code: { default: 'graph TD\n  A --> B' } };
   },
   parseHTML() {
     return [{ tag: 'div[data-type="mermaid"]', getAttrs: (el) => ({ code: el.getAttribute('data-code') || '' }) }];
   },
-  renderHTML({ node }) {
-    return ['div', { 'data-type': 'mermaid', 'data-code': node.attrs.code }];
+  renderHTML({ node, HTMLAttributes }) {
+    // Merging HTMLAttributes is what carries the global block id through the
+    // HTML round trip ProseMirror uses for copy/paste and for saving.
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'mermaid', 'data-code': node.attrs.code })];
   },
   addNodeView() {
     return ReactNodeViewRenderer(MermaidView);
