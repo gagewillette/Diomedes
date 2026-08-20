@@ -339,6 +339,14 @@ export async function migrate() {
     `CREATE INDEX IF NOT EXISTS pages_sibling_order_idx ON pages (space_id, parent_id, order_key)
      WHERE deleted_at IS NULL`
   );
+  // Exact-title lookup, the way `[[links]]` are matched: normalized, per space.
+  // `resolve-titles` and the link table's own title matching both read through
+  // this, so neither has to scan a space's pages to answer "what is titled X?".
+  await q(
+    `CREATE INDEX IF NOT EXISTS pages_title_norm_idx ON pages
+     (space_id, lower(regexp_replace(btrim(title), '\\s+', ' ', 'g')))
+     WHERE deleted_at IS NULL`
+  );
   try {
     await q('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await q('CREATE INDEX IF NOT EXISTS pages_title_trgm_idx ON pages USING gin (title gin_trgm_ops)');

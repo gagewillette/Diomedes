@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { asyncRoute, httpError } from '../lib/util.js';
 import { requireAuth, requireAdmin } from '../lib/auth.js';
 import {
-  getWorkspace, setDataSavings, setPerformance, setWorkspaceName, WORKSPACE_NAME_MAX,
+  getWorkspace, setCodeIntelligence, setDataSavings, setPerformance, setWorkspaceName,
+  WORKSPACE_NAME_MAX,
 } from '../lib/workspace.js';
 import { publish } from '../lib/events.js';
 import { workspaceInfo } from '../lib/workspaceInfo.js';
@@ -88,6 +89,40 @@ router.patch(
 
     const workspace = await setPerformance(patch);
     // Browsers start or stop their collectors off the back of this event.
+    publish({ type: 'workspace-settings-changed', workspace });
+    res.json({ workspace });
+  })
+);
+
+// Same shape again, for the code-intelligence group. maxBytes is clamped in
+// the lib rather than rejected here: an admin who types 5000000 gets the
+// ceiling, not an error about a number they cannot see the bounds of.
+router.patch(
+  '/settings/code-intelligence',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const patch = req.body?.codeIntelligence;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw httpError(400, 'codeIntelligence must be an object');
+    }
+    const keys = Object.keys(patch);
+    const known = ['highlighting', 'linting', 'maxBytes'];
+    if (!keys.length || keys.some((k) => !known.includes(k))) {
+      throw httpError(400, `codeIntelligence accepts only: ${known.join(', ')}`);
+    }
+    for (const flag of ['highlighting', 'linting']) {
+      if (flag in patch && typeof patch[flag] !== 'boolean') {
+        throw httpError(400, `${flag} must be a boolean`);
+      }
+    }
+    if ('maxBytes' in patch && (typeof patch.maxBytes !== 'number' || !Number.isFinite(patch.maxBytes))) {
+      throw httpError(400, 'maxBytes must be a number');
+    }
+
+    const workspace = await setCodeIntelligence(patch);
+    // Editors that are already open clear or rebuild their decorations off the
+    // back of this event — no reload.
     publish({ type: 'workspace-settings-changed', workspace });
     res.json({ workspace });
   })

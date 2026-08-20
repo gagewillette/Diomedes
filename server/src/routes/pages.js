@@ -5,7 +5,14 @@ import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '..
 import { searchPages, notePageChanged } from '../search/index.js';
 import { removeStoredFiles } from '../lib/storage.js';
 import { getHub } from '../collab/index.js';
-import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
+import {
+  syncPageLinks,
+  resolveLinksByTitle,
+  unresolveStaleTitleLinks,
+  lookupTitles,
+  pickTitleMatch,
+  normalizeTitle,
+} from '../lib/links.js';
 import { movePage, siblingOrderKeys } from '../lib/pageMove.js';
 import { writePageBody } from '../lib/pageBody.js';
 import { pageSubtree } from '../lib/subtree.js';
@@ -133,6 +140,52 @@ router.get(
       [...acc.params, ids]
     );
     res.json({ pages: rows });
+  })
+);
+
+// Exact-title resolution for whoever is writing `[[links]]` without a person
+// in the loop — the MCP resolving a bulk import, the client healing a link
+// whose target was written after it. Unlike `link-search` this matches whole
+// normalized titles, answers a batch in one round trip, and says "ambiguous"
+// instead of picking whichever page happened to be touched last.
+const RESOLVE_TITLES_MAX = 200;
+
+router.post(
+  '/pages/resolve-titles',
+  asyncRoute(async (req, res) => {
+    const titles = Array.isArray(req.body?.titles) ? req.body.titles : [];
+    if (titles.length > RESOLVE_TITLES_MAX) {
+      throw httpError(400, `At most ${RESOLVE_TITLES_MAX} titles per request`);
+    }
+    const spaceId = req.body?.spaceId || null;
+    // Only float a space the caller can actually read; an unreadable one is a
+    // 403 rather than a silent widening of the search.
+    if (spaceId) await assertSpaceRole(req.user, spaceId, 'reader');
+
+    const acc = accessibleSpacesCTE(req.user);
+    const byKey = await lookupTitles(titles.map((t) => String(t || '')), acc);
+
+    const slim = (p) => ({
+      id: p.id,
+      title: p.title,
+      icon: p.icon,
+      space_id: p.space_id,
+      space_slug: p.space_slug,
+      space_name: p.space_name,
+    });
+    const results = {};
+    for (const title of titles) {
+      const asked = String(title || '');
+      if (asked in results) continue;
+      const match = pickTitleMatch(byKey.get(normalizeTitle(asked)), spaceId);
+      results[asked] =
+        match.status === 'ok'
+          ? { status: 'ok', ...slim(match.page) }
+          : match.status === 'ambiguous'
+            ? { status: 'ambiguous', candidates: match.candidates.map(slim) }
+            : { status: 'not_found' };
+    }
+    res.json({ results });
   })
 );
 

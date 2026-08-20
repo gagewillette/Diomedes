@@ -12,7 +12,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
 import {
-  FONT_LABELS, FONT_STACKS, KEYMAP_LABELS, VIM_CHALLENGE, isVimQuitAnswer,
+  CODE_LINTING_LABELS, FONT_LABELS, FONT_STACKS, KEYMAP_LABELS, VIM_CHALLENGE, isVimQuitAnswer,
 } from '../lib/prefs.js';
 
 export default function Settings() {
@@ -105,6 +105,18 @@ export default function Settings() {
             onChange={(e) => savePref({ smoothCaret: e.currentTarget.checked })}
           />
           <KeymapSetting value={preferences.keymap} onChange={(keymap) => savePref({ keymap })} />
+          {/* The cost of checking code is paid per device, so this is the knob
+              for the person on the old laptop. It can only turn checking down:
+              the workspace switch is a ceiling, and an admin who has switched
+              checking off means it off everywhere. */}
+          <Select
+            label="Code block checking"
+            description="Parses code blocks in this browser and underlines problems. Nothing is uploaded. Your workspace can switch it off for everyone; this only turns it down further, on this device."
+            data={Object.entries(CODE_LINTING_LABELS).map(([v, label]) => ({ value: v, label }))}
+            value={preferences.codeLinting}
+            onChange={(v) => v && savePref({ codeLinting: v })}
+            allowDeselect={false}
+          />
           <Switch
             label="Interface animations"
             description="Fades, sidebar transitions and hover effects"
