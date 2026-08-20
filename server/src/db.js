@@ -80,10 +80,9 @@ CREATE INDEX IF NOT EXISTS pages_space_idx ON pages (space_id) WHERE deleted_at 
 CREATE INDEX IF NOT EXISTS pages_parent_idx ON pages (parent_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS pages_tsv_idx ON pages USING gin (tsv);
 CREATE INDEX IF NOT EXISTS pages_updated_idx ON pages (updated_at DESC) WHERE deleted_at IS NULL;
--- The tree is read as "children of this parent, in order", which is exactly
--- this index; the sibling list a drag measures against comes from it too.
-CREATE INDEX IF NOT EXISTS pages_sibling_order_idx ON pages (space_id, parent_id, order_key)
-  WHERE deleted_at IS NULL;
+-- pages_sibling_order_idx is created in migrate(), not here. On an existing
+-- deployment this block runs before the ALTER that adds order_key, and
+-- CREATE INDEX IF NOT EXISTS still fails on a column that does not exist yet.
 
 -- One row per top-level block of a page, projected from pages.content inside
 -- the same transaction that stores it. See server/src/lib/blocks.js for why
@@ -232,7 +231,9 @@ CREATE TABLE IF NOT EXISTS page_chunks (
   UNIQUE (page_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS page_chunks_page_idx ON page_chunks (page_id);
-CREATE INDEX IF NOT EXISTS page_chunks_blocks_idx ON page_chunks USING gin (source_block_ids);
+-- page_chunks_blocks_idx is created in migrate() for the same reason as
+-- pages_sibling_order_idx: on an existing database the column it indexes does
+-- not exist until the ALTER below has run.
 CREATE INDEX IF NOT EXISTS page_chunks_embedding_idx ON page_chunks USING hnsw (embedding vector_cosine_ops);
 `;
 
@@ -323,6 +324,13 @@ export async function migrate() {
   await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS rev bigint NOT NULL DEFAULT 0`);
   await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS order_key text COLLATE "C" NOT NULL DEFAULT 'a0'`);
   await migrateTreeOrder();
+  // Only now that order_key is guaranteed to exist. The tree is read as
+  // "children of this parent, in order", which is exactly this index; the
+  // sibling list a drag measures against comes from it too.
+  await q(
+    `CREATE INDEX IF NOT EXISTS pages_sibling_order_idx ON pages (space_id, parent_id, order_key)
+     WHERE deleted_at IS NULL`
+  );
   try {
     await q('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await q('CREATE INDEX IF NOT EXISTS pages_title_trgm_idx ON pages USING gin (title gin_trgm_ops)');
