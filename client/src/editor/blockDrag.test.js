@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { Schema } from '@tiptap/pm/model';
 import { EditorState, NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { BLOCK_ID_ATTR } from './blockId.js';
-import { createHideScheduler, moveBlockBy } from './blockDrag.js';
+import {
+  createHideScheduler,
+  dropIndex,
+  moveBlockBy,
+  moveBlockTo,
+  shiftFor,
+  slotAdvance,
+} from './blockDrag.js';
 
 // The same minimal schema blockId.test.js uses: enough of a document to move
 // blocks around in, without a DOM or a TipTap editor.
@@ -89,6 +96,102 @@ test('moving down then up leaves the document as it was', () => {
   const there = move(withCursorIn(before, 0), 1);
   const back = move(there, -1);
   assert.deepEqual(idsOf(back), idsOf(before));
+});
+
+// ---- dropping a block somewhere further off ----
+//
+// A drag is not a series of one-slot nudges: it takes a block out and puts it
+// back at an index worked out from where the pointer is. These pin down that
+// index, and the arithmetic the drag uses to decide it, because getting it
+// wrong by one is the difference between "above that block" and "below it".
+
+/** Apply a to-index move and return the resulting state, or null if refused. */
+function moveTo(state, from, to, options) {
+  let next = null;
+  const ok = moveBlockTo(state, (tr) => { next = state.apply(tr); }, from, to, options);
+  return ok ? next : null;
+}
+
+test('a block dropped further down lands at the index it was given', () => {
+  const state = stateOf(p('one'), p('two'), p('three'), p('four'));
+  assert.deepEqual(idsOf(moveTo(state, 0, 2)), ['two', 'three', 'one', 'four']);
+});
+
+test('a block dropped further up lands at the index it was given', () => {
+  const state = stateOf(p('one'), p('two'), p('three'), p('four'));
+  assert.deepEqual(idsOf(moveTo(state, 3, 1)), ['one', 'four', 'two', 'three']);
+});
+
+test('dropping a block back where it started changes nothing', () => {
+  const state = stateOf(p('one'), p('two'));
+  assert.equal(moveBlockTo(state, null, 1, 1), false);
+});
+
+test('an index outside the document is refused rather than clamped', () => {
+  const state = stateOf(p('one'), p('two'));
+  assert.equal(moveBlockTo(state, null, 0, 2), false);
+  assert.equal(moveBlockTo(state, null, -1, 1), false);
+});
+
+test('a dropped textblock gets a cursor, not a whole-node selection', () => {
+  const after = moveTo(stateOf(p('one'), p('two'), p('three')), 2, 0, { offset: 0 });
+  assert.ok(after.selection instanceof TextSelection);
+  assert.equal(after.selection.$from.parent.attrs[BLOCK_ID_ATTR], 'three');
+});
+
+test('a dropped atom block is selected, there being no cursor to put in it', () => {
+  const rule = schema.nodes.horizontalRule.create({ [BLOCK_ID_ATTR]: 'rule' });
+  const after = moveTo(stateOf(p('one'), p('two'), rule), 2, 0);
+  assert.ok(after.selection instanceof NodeSelection);
+  assert.equal(after.selection.node.attrs[BLOCK_ID_ATTR], 'rule');
+});
+
+// Blocks 100px tall with 20px between them, as measured before the drag.
+const laidOut = (count) =>
+  Array.from({ length: count }, (_, i) => ({ top: i * 120, bottom: i * 120 + 100, height: 100 }));
+
+test('the drop index counts the midpoints the pointer has passed', () => {
+  const blocks = laidOut(4);
+  // Dragging block 0 while the pointer sits just above block 2's midpoint:
+  // only block 1 is behind it.
+  assert.equal(dropIndex(blocks, 0, 289), 1);
+  // Past block 2's midpoint (240 + 50 = 290) it takes block 2's place too.
+  assert.equal(dropIndex(blocks, 0, 291), 2);
+});
+
+test('holding a block above everything drops it first, below everything drops it last', () => {
+  const blocks = laidOut(4);
+  assert.equal(dropIndex(blocks, 2, -500), 0);
+  assert.equal(dropIndex(blocks, 2, 5000), 3);
+});
+
+test('a pointer that has not left the block it picked up keeps its place', () => {
+  const blocks = laidOut(4);
+  assert.equal(dropIndex(blocks, 1, 170), 1);
+});
+
+test('the slot a block leaves behind is its height plus the gap after it', () => {
+  const blocks = laidOut(3);
+  assert.equal(slotAdvance(blocks, 0), 120);
+  // The last block has nothing after it, so the gap before it stands in.
+  assert.equal(slotAdvance(blocks, 2), 120);
+  assert.equal(slotAdvance([{ top: 0, bottom: 40, height: 40 }], 0), 40);
+});
+
+test('only the blocks jumped over slide, and they slide one slot the other way', () => {
+  // 1 -> 3: blocks 2 and 3 come up, 0 stays.
+  assert.equal(shiftFor(0, 1, 3, 120), 0);
+  assert.equal(shiftFor(2, 1, 3, 120), -120);
+  assert.equal(shiftFor(3, 1, 3, 120), -120);
+  assert.equal(shiftFor(1, 1, 3, 120), 0, 'the dragged block is moved by the pointer, not by this');
+  // 3 -> 1: blocks 1 and 2 go down.
+  assert.equal(shiftFor(1, 3, 1, 120), 120);
+  assert.equal(shiftFor(2, 3, 1, 120), 120);
+  assert.equal(shiftFor(0, 3, 1, 120), 0);
+});
+
+test('a preview that shifts nothing is a drop that changes nothing', () => {
+  for (let i = 0; i < 4; i++) assert.equal(shiftFor(i, 2, 2, 120), 0);
 });
 
 // ---- the handle's grace period ----
