@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActionIcon, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { IconMaximize, IconX, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
 
@@ -29,8 +29,11 @@ function pinSvgSize(root) {
  *   renderNode - async () => Node, mounted into the viewer (excalidraw export)
  */
 export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html, renderNode }) {
-  const viewportRef = useRef(null);
-  const contentRef = useRef(null);
+  // the modal mounts its body a tick after `opened` flips, so plain refs are
+  // still null when the effects below first run — and a ref changing never
+  // re-runs them. Callback refs land in state, which does.
+  const [viewportEl, setViewportEl] = useState(null);
+  const [contentEl, setContentEl] = useState(null);
   const [view, setView] = useState({ x: 0, y: 0, s: 1 });
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -42,9 +45,9 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
 
   // scale so the diagram fills the viewport, then centre it
   const fit = useCallback(() => {
-    const vp = viewportRef.current;
-    const el = contentRef.current;
-    if (!vp || !el) return;
+    const vp = viewportEl;
+    const el = contentEl;
+    if (!vp || !el) return false;
     const prev = el.style.transform;
     el.style.transform = 'none';
     const cw = el.offsetWidth;
@@ -52,14 +55,26 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
     el.style.transform = prev;
     const vw = vp.clientWidth;
     const vh = vp.clientHeight;
-    if (!cw || !ch || !vw || !vh) return;
+    if (!cw || !ch || !vw || !vh) return false;
     const s = clampScale(Math.min((vw * 0.94) / cw, (vh * 0.94) / ch));
     setViewSafe({ s, x: (vw - cw * s) / 2, y: (vh - ch * s) / 2 });
-  }, [setViewSafe]);
+    return true;
+  }, [setViewSafe, viewportEl, contentEl]);
+
+  // the modal animates in, so the first measurement can land on a viewport that
+  // has no size yet — keep asking for a frame until one of them measures
+  const requestFit = useCallback(() => {
+    let frames = 0;
+    const attempt = () => {
+      if (fit() || ++frames > 30) return;
+      requestAnimationFrame(attempt);
+    };
+    requestAnimationFrame(attempt);
+  }, [fit]);
 
   // zoom keeping the point under the cursor (or the viewport centre) fixed
   const zoomAt = useCallback((factor, px, py) => {
-    const vp = viewportRef.current;
+    const vp = viewportEl;
     if (!vp) return;
     const rect = vp.getBoundingClientRect();
     const cx = px == null ? rect.width / 2 : px - rect.left;
@@ -68,39 +83,37 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
     const s = clampScale(v.s * factor);
     const k = s / v.s;
     setViewSafe({ s, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k });
-  }, [setViewSafe]);
+  }, [setViewSafe, viewportEl]);
 
   // mount the diagram content
   useEffect(() => {
-    if (!opened) return undefined;
-    const el = contentRef.current;
-    if (!el) return undefined;
+    if (!opened || !contentEl) return undefined;
     let cancelled = false;
     if (renderNode) {
       (async () => {
         try {
           const node = await renderNode();
-          if (cancelled || !contentRef.current) return;
-          contentRef.current.replaceChildren(node);
-          pinSvgSize(contentRef.current);
-          requestAnimationFrame(fit);
+          if (cancelled) return;
+          contentEl.replaceChildren(node);
+          pinSvgSize(contentEl);
+          requestFit();
         } catch (err) {
           console.error('diagram lightbox render failed', err);
         }
       })();
     } else if (html != null) {
-      el.innerHTML = html;
-      pinSvgSize(el);
-      requestAnimationFrame(fit);
+      contentEl.innerHTML = html;
+      pinSvgSize(contentEl);
+      requestFit();
     } else {
-      requestAnimationFrame(fit);
+      requestFit();
     }
     return () => { cancelled = true; };
-  }, [opened, html, renderNode, fit]);
+  }, [opened, contentEl, html, renderNode, requestFit]);
 
   // wheel zoom needs a non-passive listener to be able to preventDefault
   useEffect(() => {
-    const vp = viewportRef.current;
+    const vp = viewportEl;
     if (!opened || !vp) return undefined;
     const onWheel = (e) => {
       e.preventDefault();
@@ -108,7 +121,7 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
     };
     vp.addEventListener('wheel', onWheel, { passive: false });
     return () => vp.removeEventListener('wheel', onWheel);
-  }, [opened, zoomAt]);
+  }, [opened, viewportEl, zoomAt]);
 
   useEffect(() => {
     if (!opened) return undefined;
@@ -174,17 +187,17 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
           </Group>
         </div>
         <div
-          ref={viewportRef}
+          ref={setViewportEl}
           className="gd-lightbox-viewport"
           onPointerDown={onPointerDown}
           onDoubleClick={() => zoomAt(1.6)}
         >
           <div
-            ref={contentRef}
+            ref={setContentEl}
             className="gd-lightbox-content"
             style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.s})` }}
           >
-            {src ? <img src={src} alt={title} draggable={false} onLoad={fit} /> : null}
+            {src ? <img src={src} alt={title} draggable={false} onLoad={requestFit} /> : null}
           </div>
         </div>
       </div>
@@ -192,26 +205,84 @@ export function DiagramLightbox({ opened, onClose, title = 'Diagram', src, html,
   );
 }
 
+/* -------------------------------------------------------------------------
+ * The viewer lives once, at the top of the app, driven by this store.
+ *
+ * It used to be rendered by each diagram node view, opened from that view's
+ * own state. Clicking a diagram makes ProseMirror re-draw the node, which
+ * throws that state away — the click "did nothing". Keeping it outside React's
+ * editor tree makes opening the viewer independent of the node's lifetime.
+ * ---------------------------------------------------------------------- */
+let zoomTarget = null;
+const zoomListeners = new Set();
+
+function emitZoom() {
+  for (const listener of zoomListeners) listener();
+}
+
+/** open the viewer on `{ title, src | html | renderNode }` */
+export function openDiagramLightbox(target) {
+  zoomTarget = target;
+  emitZoom();
+}
+
+export function closeDiagramLightbox() {
+  zoomTarget = null;
+  emitZoom();
+}
+
+function subscribeZoom(listener) {
+  zoomListeners.add(listener);
+  return () => zoomListeners.delete(listener);
+}
+
+const getZoomTarget = () => zoomTarget;
+
+/** mount once, above the editor, so a diagram can outlive its node view */
+export function DiagramLightboxHost() {
+  const target = useSyncExternalStore(subscribeZoom, getZoomTarget, getZoomTarget);
+  return (
+    <DiagramLightbox
+      // a fresh viewer per diagram: no stale pan/zoom or leftover svg
+      key={target?.key ?? 'none'}
+      opened={Boolean(target)}
+      onClose={closeDiagramLightbox}
+      title={target?.title}
+      src={target?.src}
+      html={target?.html}
+      renderNode={target?.renderNode}
+    />
+  );
+}
+
 /**
  * Click opens the zoom viewer, double-click opens the editor (when editable).
- * A short delay lets the double-click win over the single click.
+ * A short delay lets the double-click win over the single click. The timer is
+ * module-level on purpose — a node view re-drawn by the click must not cancel
+ * the zoom it just asked for.
+ *
+ * Everything hangs off mousedown, in the capture phase: pressing on a diagram
+ * makes ProseMirror select the node and rebuild its DOM, so by the time a
+ * bubbled mousedown (let alone the click that would follow) reaches React, the
+ * element it was aimed at is gone and the handler never runs.
  */
+let clickTimer = null;
+
 export function useZoomClickHandlers({ editable, onZoom, onEdit }) {
-  const timer = useRef(null);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  if (!editable) {
-    return { onClick: onZoom, style: { cursor: 'zoom-in' } };
-  }
+  const zoom = () => {
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(onZoom, editable ? 220 : 0);
+  };
   return {
     style: { cursor: 'zoom-in' },
-    onClick: (e) => {
-      if (e.detail > 1) return;
-      clearTimeout(timer.current);
-      timer.current = setTimeout(onZoom, 220);
-    },
-    onDoubleClick: () => {
-      clearTimeout(timer.current);
-      onEdit?.();
+    onMouseDownCapture: (e) => {
+      if (e.button !== 0) return;
+      if (e.detail > 1) {
+        clearTimeout(clickTimer);
+        if (editable) onEdit?.();
+        return;
+      }
+      zoom();
     },
   };
 }

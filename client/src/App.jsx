@@ -13,6 +13,7 @@ import MembersAdmin from './pages/MembersAdmin.jsx';
 import WorkspaceSettings from './pages/WorkspaceSettings.jsx';
 import SharePage from './pages/SharePage.jsx';
 import { onNavigate } from './lib/api.js';
+import { DiagramLightboxHost } from './editor/DiagramLightbox';
 
 function Protected({ children }) {
   const { loading, user } = useAuth();
@@ -43,6 +44,8 @@ export default function App() {
   return (
     <AuthProvider>
       <InternalLinkNavigation />
+      {/* one viewer for every diagram on the page — see DiagramLightbox */}
+      <DiagramLightboxHost />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/setup" element={<Setup />} />
