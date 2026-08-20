@@ -8,9 +8,11 @@ const heading = (level, text) => ({ type: 'heading', attrs: { level }, content: 
 
 test('docBlocks skips empty nodes and tags heading levels', () => {
   const blocks = docBlocks(doc(heading(2, 'Setup'), para(''), para('Install it.')));
+  // blockId is null here because these fixtures predate block ids; a document
+  // written by the editor carries one per node. See blockEmbedding.test.js.
   assert.deepEqual(blocks, [
-    { text: 'Setup', level: 2 },
-    { text: 'Install it.', level: 0 },
+    { text: 'Setup', level: 2, blockId: null },
+    { text: 'Install it.', level: 0, blockId: null },
   ]);
 });
 
