@@ -417,6 +417,14 @@ const SEED_LEASE_SEC = 15;
 // The NOT EXISTS guard closes the other end of it: once any CRDT state has been
 // persisted for the page, seeding can never fire again. Without it, deleting
 // every word on a page would make it look unseeded and resurrect the old text.
+//
+// That guard, and not `collab_seeded`, is what decides. The flag records what a
+// client *said* it did, and a client can say it and then be gone before the
+// text ever left the browser — a page switch, a closed tab. Gating on the flag
+// therefore had a terminal state: a page marked seeded whose CRDT holds
+// nothing, which opens blank for everyone, forever, with no way back. Asking
+// for the ydoc instead makes an unfinished seed simply expire with its lease
+// and be picked up by the next client.
 router.post(
   '/pages/:id/collab/claim-seed',
   asyncRoute(async (req, res) => {
@@ -424,7 +432,7 @@ router.post(
     await assertSpaceRole(req.user, page.space_id, 'writer');
     const { rows } = await q(
       `UPDATE pages SET collab_seed_claimed_at = now()
-       WHERE id = $1 AND collab_seeded = false
+       WHERE id = $1
          AND NOT EXISTS (SELECT 1 FROM page_ydoc y WHERE y.page_id = pages.id)
          AND (collab_seed_claimed_at IS NULL
               OR collab_seed_claimed_at < now() - ($2 || ' seconds')::interval)
@@ -435,8 +443,8 @@ router.post(
   })
 );
 
-// Confirmation that the winner actually wrote the content into the CRDT. Only
-// now is the claim retired for good.
+// A client reporting that it did write the content into the CRDT. Recorded,
+// but deliberately not the gate — see the note above claim-seed.
 router.post(
   '/pages/:id/collab/confirm-seed',
   asyncRoute(async (req, res) => {

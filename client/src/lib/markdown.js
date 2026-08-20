@@ -10,8 +10,11 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
 import Document from '@tiptap/extension-document';
-import { BlockId } from '../editor/blockId.js';
-import { FootnoteExtensions } from '../editor/nodes/Footnote.jsx';
+import { BlockId, stampMissingIds } from '../editor/blockId.js';
+// The base nodes, not the React ones from Footnote.jsx: the editor below has no
+// DOM to draw into, node views have no say in how markdown parses, and keeping
+// React out of this module is what lets `node --test` exercise the importer.
+import { Footnote, FootnoteRef, Footnotes } from '../editor/nodes/footnoteNodes.js';
 import { hydrateDiagramBlocks } from './diagramBlocks.js';
 import { lowerForMarkdown, unescapeCalloutBadges } from './exportDoc.js';
 
@@ -29,7 +32,7 @@ export function markdownToJSON(md) {
       Image,
       Table, TableRow, TableCell, TableHeader,
       TaskList, TaskItem,
-      ...FootnoteExtensions,
+      FootnoteRef, Footnote, Footnotes,
       Markdown.configure({ html: false }),
       // Imported markdown becomes real blocks the moment it lands, rather than
       // waiting for someone to open the page and edit it. Without this the MCP
@@ -38,6 +41,12 @@ export function markdownToJSON(md) {
     ],
     content: md,
   });
+  // The extension only stamps from `appendTransaction`, and setting the initial
+  // content is not a transaction — so every imported block would come out of
+  // here with `blockId: null` and be named by the server instead. Ask for the
+  // stamp explicitly, through the same registry that dedups ids in the editor.
+  const stamp = stampMissingIds(editor.state);
+  if (stamp) editor.view.dispatch(stamp);
   const json = editor.getJSON();
   editor.destroy();
   // The headless editor above has no diagram extensions — it has no DOM to
