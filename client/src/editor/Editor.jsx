@@ -49,6 +49,7 @@ import { BlockId } from './blockId.js';
 import { TrailingNode } from './trailingNode.js';
 import { BlockDrag } from './blockDrag.js';
 import { SectionRef } from './SectionRef.js';
+import { HeadingLink } from './HeadingLink.jsx';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
@@ -170,6 +171,7 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // Heading anchors plus the §-reference overlay. Pure decoration, so it runs
     // for readers and the public share view exactly as it does for an author.
     SectionRef,
+    HeadingLink,
     // Stamps a stable id on every block. Position in this list does not matter:
     // global attributes are applied to the types they name once the whole
     // extension set is resolved, so DocumentBlock below is covered too.

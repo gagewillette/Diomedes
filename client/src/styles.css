@@ -160,6 +160,18 @@ body.gd-block-drag-active {
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
 }
+
+/* The markdown a heading link unfolds into while the caret is inside it. It has
+   to read as syntax rather than as words — dimmed, monospaced, and unselectable
+   so a drag across the sentence picks up the label and not the brackets. */
+.gd-link-syntax {
+  color: var(--mantine-color-dimmed);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  opacity: 0.75;
+  user-select: none;
+  cursor: default;
+}
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
