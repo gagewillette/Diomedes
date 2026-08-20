@@ -800,6 +800,48 @@
   background: var(--mantine-color-orange-7);
   box-shadow: 0 0 0 2px var(--mantine-color-orange-7);
 }
+/* ---------- § section references ---------- */
+/* Mid-sentence, so quieter than a mention chip: body weight, accent colour, a
+   dotted underline that reads as "there is something here" without shouting. */
+.gd-section-ref {
+  color: var(--mantine-color-blue-7);
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+[data-mantine-color-scheme='dark'] .gd-section-ref { color: var(--mantine-color-blue-4); }
+.gd-section-ref:hover { text-decoration-style: solid; }
+.gd-section-ref:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-5);
+  outline-offset: 1px;
+}
+/* A reference to a section that isn't there stays plain text. */
+.gd-section-ref--unresolved {
+  color: inherit;
+  cursor: default;
+  text-decoration: underline dotted var(--mantine-color-dimmed);
+  opacity: 0.85;
+}
+
+/* The sticky page topbar would otherwise eat the heading we just jumped to. */
+.gd-editor :is(h1, h2, h3, h4) { scroll-margin-top: 64px; }
+.gd-editor :is(h1, h2, h3, h4):focus { outline: none; }
+
+.gd-section-landed { animation: gd-section-flash 1.4s ease-out; }
+@keyframes gd-section-flash {
+  0%, 40% { background: var(--mantine-color-yellow-2); }
+  100% { background: transparent; }
+}
+[data-mantine-color-scheme='dark'] .gd-section-landed { animation-name: gd-section-flash-dark; }
+@keyframes gd-section-flash-dark {
+  0%, 40% { background: var(--mantine-color-yellow-9); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gd-section-landed { animation-duration: 0.01ms; }
+}
+
 @media print {
   .gd-findbar { display: none; }
 }
