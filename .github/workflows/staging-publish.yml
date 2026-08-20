@@ -2,8 +2,9 @@ name: Build and publish staging image
 
 # Every push to staging (i.e. every PR merged into it, since ci.yml is a
 # required check) rebuilds the staging image and pushes it to GHCR under the
-# `staging` tag. The staging host's watchtower/compose stack tracks that tag,
-# so merging into staging is what deploys to the staging environment.
+# `stage` tag (mirrors `prod` from docker-publish.yml). The staging host's
+# watchtower/compose stack tracks that tag, so merging into staging is what
+# deploys to the staging environment.
 on:
   push:
     branches: [staging]
@@ -48,8 +49,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=staging
-            type=raw,value=staging-{{sha}}
+            type=raw,value=stage
+            type=raw,value=stage-{{sha}}
 
       - name: Build and push
         uses: docker/build-push-action@v6

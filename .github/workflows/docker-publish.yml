@@ -131,10 +131,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # `latest`/`prod` and `staging` are disjoint by construction: this
+          # `latest`/`prod` and `stage` are disjoint by construction: this
           # workflow only fires on pushes to main (or a v* tag), and
           # staging-publish.yml is the only thing that ever writes the
-          # `staging` tag, on pushes to the staging branch. Neither workflow
+          # `stage` tag, on pushes to the staging branch. Neither workflow
           # writes the other's tag, so watchtower on each host only ever sees
           # updates for the tag its compose file is pinned to. `prod` is an
           # explicit alias for `latest` so a compose file can pin to it

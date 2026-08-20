@@ -8,7 +8,7 @@
 #   cp docker-compose.staging.yml docker-compose.staging.yml   # if renaming
 #   docker compose -f docker-compose.staging.yml up -d
 #
-# The image is pulled from GHCR at the `staging` tag — staging-publish.yml
+# The image is pulled from GHCR at the `stage` tag — staging-publish.yml
 # rebuilds and pushes it on every merge into the `staging` branch. Watchtower
 # is NOT started here: reuse the one instance from the prod stack (it already
 # polls --label-enable, so it picks up any container carrying the
@@ -17,7 +17,7 @@
 
 services:
   diomedes:
-    image: ghcr.io/gagewillette/diomedes:staging
+    image: ghcr.io/gagewillette/diomedes:stage
     container_name: diomedes-staging
     restart: unless-stopped
     pull_policy: always
