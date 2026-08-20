@@ -9,9 +9,11 @@ import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 
 export default function MembersAdmin() {
   const { user: me } = useAuth();
+  useDocumentIdentity('Members', '👥');
   const [users, setUsers] = useState([]);
   const [createOpen, createHandlers] = useDisclosure(false);
   const [form, setForm] = useState({ username: '', name: '', password: '', role: 'member' });

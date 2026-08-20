@@ -27,6 +27,7 @@ import { pickUserColor } from '../lib/userColor.js';
 import BacklinksPanel from '../components/BacklinksPanel.jsx';
 import PagePicker from '../components/PagePicker.jsx';
 import { onFocusEditor, onRequestSave } from '../lib/vimFocus.js';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
@@ -195,6 +196,10 @@ export default function PageEditor() {
 
   // flush pending save on unmount/page switch
   useEffect(() => () => clearTimeout(saveTimer.current), [pageId]);
+
+  // The tab wears the open document's name and icon, and follows the title
+  // field as it is typed rather than waiting for the debounced save.
+  useDocumentIdentity(data ? title : undefined, data?.page.icon);
 
   if (!data)
     return <Center h="60vh"><Loader /></Center>;

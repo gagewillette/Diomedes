@@ -13,6 +13,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { markPageReady } from '../lib/perf.js';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 import { formatBytes, formatMs, formatCount, formatDuration, formatDate } from '../lib/format.js';
 import Sparkline from '../components/Sparkline.jsx';
 
@@ -128,6 +129,7 @@ function ShareTable({ rows, columns, valueKey }) {
  */
 export default function WorkspaceInfo() {
   const { isAdmin, workspaceName, performanceSettings } = useAuth();
+  useDocumentIdentity(`${workspaceName} info`, '📊');
   const [info, setInfo] = useState(null);
   const [perf, setPerf] = useState(null);
   const [range, setRange] = useState('24h');

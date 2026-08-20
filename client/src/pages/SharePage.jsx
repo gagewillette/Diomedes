@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { api } from '../lib/api.js';
 import Editor from '../editor/Editor.jsx';
 import FindBar from '../components/FindBar.jsx';
+import { useDocumentIdentity } from '../lib/documentTitle.js';
 
 export default function SharePage() {
   const { token } = useParams();
@@ -18,6 +19,9 @@ export default function SharePage() {
       .then(setData)
       .catch((err) => setError(err.message));
   }, [token]);
+
+  // A shared link is a document too, so name the tab after it.
+  useDocumentIdentity(data?.page.title, data?.page.icon);
 
   // Ctrl+F → in-document find on shared pages too.
   useEffect(() => {
