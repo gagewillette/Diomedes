@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 340" width="1280" height="340" role="img" aria-label="Diomedes — a self-hosted wiki that thinks in blocks">
+  <title>Diomedes</title>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1020"/>
+      <stop offset="55%" stop-color="#111a33"/>
+      <stop offset="100%" stop-color="#0a0f1c"/>
+    </linearGradient>
+
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#7dd3fc"/>
+      <stop offset="35%"  stop-color="#a78bfa"/>
+      <stop offset="70%"  stop-color="#f0abfc"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+      <animate attributeName="x1" values="-1;1"  dur="7s" repeatCount="indefinite"/>
+      <animate attributeName="x2" values="0;2"   dur="7s" repeatCount="indefinite"/>
+    </linearGradient>
+
+    <radialGradient id="blobA" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#6366f1" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blobB" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#22d3ee" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blobC" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#e879f9" stop-opacity="0.40"/>
+      <stop offset="100%" stop-color="#e879f9" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="frame"><rect x="0" y="0" width="1280" height="340" rx="18"/></clipPath>
+
+    <clipPath id="typewriter">
+      <rect x="0" y="0" width="0" height="40">
+        <animate attributeName="width"
+                 values="0;440;440;0"
+                 keyTimes="0;0.45;0.92;1"
+                 dur="6s" repeatCount="indefinite"/>
+      </rect>
+    </clipPath>
+
+    <style>
+      .wordmark {
+        font: 800 96px/1 ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+        letter-spacing: -3px;
+      }
+      .tagline {
+        font: 500 25px/1 ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+        fill: #93a4c8;
+      }
+      .chip {
+        font: 600 15px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        fill: #b9c6e6;
+      }
+
+      .blob { animation: drift 18s ease-in-out infinite; transform-origin: center; }
+      .blob-b { animation-duration: 23s; animation-delay: -6s; }
+      .blob-c { animation-duration: 29s; animation-delay: -13s; }
+      @keyframes drift {
+        0%   { transform: translate(0,0) scale(1); }
+        33%  { transform: translate(46px,-26px) scale(1.14); }
+        66%  { transform: translate(-34px,22px) scale(0.92); }
+        100% { transform: translate(0,0) scale(1); }
+      }
+
+      .caret { animation: blink 1.05s steps(1) infinite; }
+      @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+
+      .grid-line { animation: slide 9s linear infinite; }
+      @keyframes slide { from { transform: translateX(0); } to { transform: translateX(64px); } }
+
+      .blk { animation: lift 4.5s ease-in-out infinite; transform-origin: center; }
+      .blk-2 { animation-delay: -1.5s; }
+      .blk-3 { animation-delay: -3s; }
+      @keyframes lift {
+        0%,100% { transform: translateY(0);    opacity: .72; }
+        50%     { transform: translateY(-11px); opacity: 1;  }
+      }
+
+      .pulse { animation: pulse 2.6s ease-in-out infinite; }
+      @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:.9 } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .blob, .caret, .grid-line, .blk, .pulse { animation: none; }
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="340" fill="url(#bg)"/>
+
+    <!-- drifting aurora -->
+    <g opacity="0.9">
+      <circle class="blob"        cx="210"  cy="90"  r="230" fill="url(#blobA)"/>
+      <circle class="blob blob-b" cx="1080" cy="250" r="260" fill="url(#blobB)"/>
+      <circle class="blob blob-c" cx="720"  cy="30"  r="200" fill="url(#blobC)"/>
+    </g>
+
+    <!-- faint moving grid -->
+    <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="1">
+      <g class="grid-line">
+        <path d="M-64 0 V340 M0 0 V340 M64 0 V340 M128 0 V340 M192 0 V340 M256 0 V340 M320 0 V340 M384 0 V340 M448 0 V340 M512 0 V340 M576 0 V340 M640 0 V340 M704 0 V340 M768 0 V340 M832 0 V340 M896 0 V340 M960 0 V340 M1024 0 V340 M1088 0 V340 M1152 0 V340 M1216 0 V340 M1280 0 V340"/>
+      </g>
+      <path d="M0 68 H1280 M0 136 H1280 M0 204 H1280 M0 272 H1280"/>
+    </g>
+
+    <!-- floating blocks motif (right) -->
+    <g transform="translate(1010,96)">
+      <g class="blk">
+        <rect x="0"  y="0"  width="180" height="26" rx="7" fill="#7dd3fc" fill-opacity="0.22" stroke="#7dd3fc" stroke-opacity="0.45"/>
+        <rect x="12" y="9"  width="96"  height="8"  rx="4" fill="#7dd3fc" fill-opacity="0.55"/>
+      </g>
+      <g transform="translate(26,48)">
+        <g class="blk blk-2">
+          <rect x="0"  y="0"  width="180" height="26" rx="7" fill="#a78bfa" fill-opacity="0.22" stroke="#a78bfa" stroke-opacity="0.45"/>
+          <rect x="12" y="9"  width="128" height="8"  rx="4" fill="#a78bfa" fill-opacity="0.55"/>
+        </g>
+      </g>
+      <g transform="translate(6,96)">
+        <g class="blk blk-3">
+          <rect x="0"  y="0"  width="180" height="26" rx="7" fill="#f0abfc" fill-opacity="0.22" stroke="#f0abfc" stroke-opacity="0.45"/>
+          <rect x="12" y="9"  width="72"  height="8"  rx="4" fill="#f0abfc" fill-opacity="0.55"/>
+        </g>
+      </g>
+      <g stroke="#93a4c8" stroke-opacity="0.35" stroke-width="1.5" fill="none" class="pulse">
+        <path d="M90 26 C90 40, 116 34, 116 48"/>
+        <path d="M116 74 C116 88, 96 82, 96 96"/>
+      </g>
+    </g>
+
+    <!-- wordmark -->
+    <text class="wordmark" x="72" y="164" fill="url(#sweep)">Diomedes</text>
+
+    <!-- typed tagline with wipe reveal + caret -->
+    <g transform="translate(76,218)">
+      <g clip-path="url(#typewriter)">
+        <text class="tagline" x="0" y="26">A self-hosted wiki that thinks in blocks.</text>
+      </g>
+      <rect class="caret" x="0" y="0" width="3" height="30" rx="1.5" fill="#a78bfa">
+        <animate attributeName="x"
+                 values="2;442;442;2"
+                 keyTimes="0;0.45;0.92;1"
+                 dur="6s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+
+    <!-- chips -->
+    <g transform="translate(74,266)">
+      <g>
+        <rect x="0" y="0" width="150" height="34" rx="17" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text class="chip" x="18" y="22">live collab</text>
+      </g>
+      <g transform="translate(164,0)">
+        <rect x="0" y="0" width="176" height="34" rx="17" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text class="chip" x="18" y="22">block storage</text>
+      </g>
+      <g transform="translate(354,0)">
+        <rect x="0" y="0" width="196" height="34" rx="17" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text class="chip" x="18" y="22">3 diagram editors</text>
+      </g>
+      <g transform="translate(564,0)">
+        <rect x="0" y="0" width="200" height="34" rx="17" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text class="chip" x="18" y="22">semantic search</text>
+      </g>
+    </g>
+
+    <rect x="0.5" y="0.5" width="1279" height="339" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+  </g>
+</svg>
