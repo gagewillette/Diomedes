@@ -332,7 +332,9 @@ export default function Editor({
     pointers: livePointers,
   });
   useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
-  useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
+  useContentSnapshot({
+    session: collab, editor, pageId, canWrite: editable, onSaveState, initialContent: content,
+  });
 
   // The smooth caret hides the real one and draws a line in its place, which
   // would sit alongside normal mode's block cursor. Vim wins.

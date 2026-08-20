@@ -154,7 +154,7 @@ export async function movePage({ page, parentId, spaceId, index, position: expli
         throw httpError(400, 'Cannot move a page inside itself');
       }
       const { rows: parent } = await conn.query(
-        'SELECT id, space_id FROM pages WHERE id = $1 AND deleted_at IS NULL',
+        'SELECT id, space_id, parent_id FROM pages WHERE id = $1 AND deleted_at IS NULL',
         [parentId]
       );
       if (!parent[0]) throw httpError(404, 'Parent page not found');
@@ -162,6 +162,15 @@ export async function movePage({ page, parentId, spaceId, index, position: expli
       // move it legitimately sits in a space the page is not in yet.
       if (parent[0].space_id !== targetSpaceId) {
         throw httpError(400, 'Parent page is in a different space');
+      }
+      // The tree is one level of subpages deep. Enforced here rather than at the
+      // route so every way of moving a page — the menu, a drag, the API — is
+      // held to it, and so the check reads the same locked rows the move writes.
+      if (parent[0].parent_id) {
+        throw httpError(400, 'Pages can only be nested one level deep');
+      }
+      if (subtreeIds.length > 1) {
+        throw httpError(400, 'A page with subpages cannot itself become a subpage');
       }
     }
 

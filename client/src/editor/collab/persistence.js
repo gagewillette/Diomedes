@@ -67,10 +67,14 @@ export function useSeedContent({ session, editor, pageId, initialContent, canWri
  * data, so the role transfers by itself when that person leaves — no election
  * protocol, and no window where nobody is saving.
  */
-export function useContentSnapshot({ session, editor, pageId, canWrite, onSaveState }) {
+export function useContentSnapshot({ session, editor, pageId, canWrite, onSaveState, initialContent }) {
   const timer = useRef(null);
   const dirty = useRef(false);
   const saving = useRef(false);
+  // Whether this session has ever seen the live document hold anything. Until
+  // it has, an empty CRDT means "the content has not arrived yet", not "the
+  // page was emptied" — see the guard in save().
+  const everFilled = useRef(false);
 
   // Deliberately keyed on ydoc/provider rather than the session object: the
   // session's identity changes whenever the connection status does, and
@@ -94,11 +98,22 @@ export function useContentSnapshot({ session, editor, pageId, canWrite, onSaveSt
       // Someone else is responsible right now. Stay dirty: if they disconnect
       // before saving, the next change re-arms this timer under new leadership.
       if (!amLeader()) return;
+      // Never let a document that has been blank all along overwrite a page
+      // that has content stored. That happens when seeding did not run — the
+      // claim went to a client that died, or the page was marked seeded before
+      // its text ever reached the CRDT — and the empty editor would otherwise
+      // persist itself over the real body. Emptying a page you can actually see
+      // still saves: by then the document has been non-empty at least once.
+      const json = editor.getJSON();
+      if (isEmptyDoc(json) && !everFilled.current && !isEmptyDoc(initialContent)) {
+        onSaveState?.('saved');
+        return;
+      }
       dirty.current = false;
       saving.current = true;
       onSaveState?.('saving');
       try {
-        await api.patch(`/api/pages/${pageId}`, { content: editor.getJSON() });
+        await api.patch(`/api/pages/${pageId}`, { content: json });
         onSaveState?.('saved');
       } catch {
         dirty.current = true;
@@ -112,6 +127,9 @@ export function useContentSnapshot({ session, editor, pageId, canWrite, onSaveSt
     // it has to persist other people's edits too.
     const onUpdate = () => {
       dirty.current = true;
+      if (!everFilled.current && !editor.isDestroyed && !isEmptyDoc(editor.getJSON())) {
+        everFilled.current = true;
+      }
       if (amLeader()) onSaveState?.('saving');
       clearTimeout(timer.current);
       timer.current = setTimeout(save, SNAPSHOT_DEBOUNCE_MS);
@@ -123,9 +141,12 @@ export function useContentSnapshot({ session, editor, pageId, canWrite, onSaveSt
       clearTimeout(timer.current);
       // Closing the page is the one moment worth saving without waiting.
       if (dirty.current && !editor.isDestroyed && amLeader()) {
+        const json = editor.getJSON();
         dirty.current = false;
-        api.patch(`/api/pages/${pageId}`, { content: editor.getJSON() }).catch(() => {});
+        if (!isEmptyDoc(json) || everFilled.current || isEmptyDoc(initialContent)) {
+          api.patch(`/api/pages/${pageId}`, { content: json }).catch(() => {});
+        }
       }
     };
-  }, [ydoc, provider, editor, pageId, canWrite, onSaveState]);
+  }, [ydoc, provider, editor, pageId, canWrite, onSaveState, initialContent]);
 }

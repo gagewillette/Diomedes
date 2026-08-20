@@ -15,6 +15,7 @@ export default function PagePicker({
   exclude = null,
   rootLabel = null,
   onlySpace = false,
+  topLevelOnly = false,
 }) {
   const [query, setQuery] = useState('');
   const [pages, setPages] = useState([]);
@@ -29,6 +30,7 @@ export default function PagePicker({
         const params = new URLSearchParams({ q: query });
         if (spaceId) params.set('spaceId', spaceId);
         if (onlySpace) params.set('onlySpace', '1');
+        if (topLevelOnly) params.set('topLevelOnly', '1');
         if (exclude) params.set('exclude', exclude);
         const data = await api.get(`/api/pages/link-search?${params}`);
         if (!cancelled) setPages(data.pages);
@@ -42,7 +44,7 @@ export default function PagePicker({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [opened, query, spaceId, exclude, onlySpace]);
+  }, [opened, query, spaceId, exclude, onlySpace, topLevelOnly]);
 
   // Start each visit from a clean search rather than the last one's leftovers.
   useEffect(() => {

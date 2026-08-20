@@ -13,6 +13,17 @@ router.use(requireAuth);
 
 const TSV_SQL = `to_tsvector('english', left(coalesce($1,'') || ' ' || coalesce($2,''), 500000))`;
 const VERSION_INTERVAL_MIN = 10;
+// Mirrors the column default; spelled out here so a page created with a body
+// and one created empty go down the same insert path.
+const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
+
+// The page tree is one level of subpages deep, no more. Lifting that limit is
+// tracked as its own piece of work; until then the rule lives on the server so
+// no client can get around it. The matching rule for *moves* is in movePage,
+// where it can read the same locked rows the move writes.
+function assertCanTakeChildren(parent) {
+  if (parent.parent_id) throw httpError(400, 'Pages can only be nested one level deep');
+}
 
 const accessibleSpacesCTE = accessibleSpacesQuery;
 
@@ -69,6 +80,9 @@ router.get(
     const conds = [`p.deleted_at IS NULL`, `p.space_id IN (${acc.sql})`];
     if (query) conds.push(`p.title ILIKE ${bind(`%${query}%`)}`);
     if (req.query.exclude) conds.push(`p.id <> ${bind(req.query.exclude)}`);
+    // Only a top-level page can take children, so the parent picker never
+    // offers a subpage as a destination.
+    if (req.query.topLevelOnly) conds.push(`p.parent_id IS NULL`);
 
     // A parent page has to live in the same space as its child, so the parent
     // picker asks for a hard filter where the [[link]] picker only wants the
@@ -123,24 +137,35 @@ router.get(
 router.post(
   '/pages',
   asyncRoute(async (req, res) => {
-    const { spaceId, parentId = null, title = '' } = req.body || {};
+    const { spaceId, parentId = null, title = '', content } = req.body || {};
     await assertSpaceRole(req.user, spaceId, 'writer');
     if (parentId) {
       const parent = await getPage(parentId);
       if (parent.space_id !== spaceId) throw httpError(400, 'Parent page is in a different space');
+      assertCanTakeChildren(parent);
     }
     const { rows: pos } = await q(
       `SELECT COALESCE(MAX(position), 0) + 1000 AS next FROM pages
        WHERE space_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND deleted_at IS NULL`,
       [spaceId, parentId]
     );
+    // Importing writes the body here rather than PATCHing it a moment later, so
+    // the page is never observable — by the editor, by search, by another
+    // client — in a half-created state with an empty body.
+    const hasContent = content !== undefined && content !== null;
+    const body = hasContent ? content : EMPTY_DOC;
+    const text = hasContent ? extractText(content) : '';
     const { rows } = await q(
-      `INSERT INTO pages (space_id, parent_id, title, position, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $5) RETURNING *`,
-      [spaceId, parentId, title, pos[0].next, req.user.id]
+      `INSERT INTO pages (space_id, parent_id, title, position, created_by, updated_by,
+                          content, text_content, tsv)
+       VALUES ($1, $2, $3, $4, $5, $5,
+               $6::jsonb, $7, ${TSV_SQL.replace('$1', '$3').replace('$2', '$7')})
+       RETURNING *`,
+      [spaceId, parentId, title, pos[0].next, req.user.id, JSON.stringify(body), text]
     );
     notePageChanged(rows[0].id, rows[0].updated_at);
     if (title) await resolveLinksByTitle(rows[0]);
+    if (hasContent) await syncPageLinks(rows[0].id, content, spaceId);
     res.status(201).json({ page: rows[0] });
   })
 );
