@@ -38,6 +38,7 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { FindInPage } from './FindInPage.js';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
@@ -107,6 +108,7 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    FindInPage,
     ...(collab
       ? [
           Collaboration.configure({ document: collab.ydoc, field: 'default' }),
