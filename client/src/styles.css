@@ -151,6 +151,14 @@ body.gd-block-drag-active {
 /* Link color is for prose links only — buttons rendered as anchors (the
    document card download button) keep their own Mantine color. */
 .gd-editor a:not(.mantine-ActionIcon-root) { color: var(--mantine-color-blue-6); }
+/* A link is clickable in both modes — including inside the editor, where the
+   caret is reached with Alt+click instead. The pointer is the only thing that
+   says so before you try. */
+.gd-editor a[href]:not(.mantine-ActionIcon-root) { cursor: pointer; }
+.gd-editor a[href]:not(.mantine-ActionIcon-root):hover {
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
 .gd-editor code {
   background: var(--mantine-color-default-hover);
   padding: 0.15em 0.35em;
