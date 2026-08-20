@@ -38,10 +38,13 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { FindInPage } from './FindInPage.js';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
 import { useFileDrop } from './useFileDrop.js';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
+import { VimMode } from './vim/VimMode.js';
+import VimStatus from './vim/VimStatus.jsx';
 import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { buildCaret, buildSelection } from './collab/carets.js';
@@ -55,8 +58,11 @@ const lowlight = createLowlight(common);
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false }) {
   return [
+    // First in the list, and at a higher priority than everything else: in
+    // normal mode the keys must not reach the ordinary editing keymap.
+    ...(vim ? [VimMode] : []),
     StarterKit.configure({
       codeBlock: false,
       heading: { levels: [1, 2, 3, 4] },
@@ -102,6 +108,7 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    FindInPage,
     ...(collab
       ? [
           Collaboration.configure({ document: collab.ydoc, field: 'default' }),
@@ -154,6 +161,8 @@ export default function Editor({
 }) {
   const { preferences, dataSavings } = useAuth();
   const wrapRef = useRef(null);
+  // Modal editing is for people writing the page; a reader gets the plain view.
+  const vimEnabled = editable && preferences.keymap === 'vim';
   // Workspace data savings: with uploads off, no new file gets in — no slash
   // command, no drop, no paste. Files already in the document keep rendering.
   const uploadsAllowed = dataSavings.fileUploads;
@@ -211,10 +220,11 @@ export default function Editor({
         uploadDocument: pageId && editable && uploadsAllowed ? uploadDocumentStable : null,
         collab,
         me,
+        vim: vimEnabled,
       }),
     // ydoc/provider identity, not the session object: the session re-wraps on
     // every connection-status change and rebuilding the list would be pointless.
-    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadsAllowed, uploadDocumentStable] // eslint-disable-line react-hooks/exhaustive-deps
+    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadsAllowed, uploadDocumentStable, vimEnabled] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const editor = useEditor({
@@ -324,7 +334,9 @@ export default function Editor({
   useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
   useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
 
-  const smoothCaret = editable && preferences.smoothCaret;
+  // The smooth caret hides the real one and draws a line in its place, which
+  // would sit alongside normal mode's block cursor. Vim wins.
+  const smoothCaret = editable && preferences.smoothCaret && !vimEnabled;
 
   const { ref: dropRef, isOver } = useFileDrop({
     editor,
@@ -352,6 +364,7 @@ export default function Editor({
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
       {collab && livePointers && <PointerLayer peers={peers} />}
+      {vimEnabled && <VimStatus editor={editor} />}
       {editable && documentPrompt}
     </div>
   );

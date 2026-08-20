@@ -69,7 +69,7 @@ Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagra
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
 | PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning + search reindex |
-| POST | `/api/pages/:id/move` | `{parentId?, position?}` |
+| POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, position?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `position` is the older explicit sort key. |
 | DELETE | `/api/pages/:id` | Soft-delete subtree (trash) |
 | POST | `/api/pages/:id/restore` | |
 | DELETE | `/api/pages/:id/permanent` | (space admin) |

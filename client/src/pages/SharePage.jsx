@@ -4,17 +4,34 @@ import { useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { api } from '../lib/api.js';
 import Editor from '../editor/Editor.jsx';
+import FindBar from '../components/FindBar.jsx';
 
 export default function SharePage() {
   const { token } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [editor, setEditor] = useState(null);
+  const [findOpen, setFindOpen] = useState(false);
 
   useEffect(() => {
     api.get(`/api/public/${token}`, { noRedirect: true })
       .then(setData)
       .catch((err) => setError(err.message));
   }, [token]);
+
+  // Ctrl+F → in-document find on shared pages too.
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'f') {
+        e.preventDefault();
+        setFindOpen(true);
+        document.querySelector('.gd-findbar input')?.select();
+      }
+      if (e.key === 'Escape') setFindOpen(false);
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
 
   if (error)
     return (
@@ -39,7 +56,8 @@ export default function SharePage() {
         Shared from {data.workspaceName} · Last updated {dayjs(data.page.updated_at).format('MMM D, YYYY')}
       </Text>
       <Divider mb="md" />
-      <Editor content={data.page.content} editable={false} />
+      <Editor content={data.page.content} editable={false} onReady={setEditor} />
+      <FindBar editor={editor} opened={findOpen} onClose={() => setFindOpen(false)} />
     </Container>
   );
 }

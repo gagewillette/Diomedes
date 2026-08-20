@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, TextInput, Stack, UnstyledButton, Group, Text, Loader, Center } from '@mantine/core';
+import { Modal, TextInput, Stack, UnstyledButton, Group, Text, Loader, Center, Kbd } from '@mantine/core';
 import { IconSearch, IconFileText } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
@@ -80,6 +80,10 @@ export default function SearchModal({ opened, onClose }) {
           </UnstyledButton>
         ))}
       </Stack>
+      <Text size="xs" c="dimmed" mt="sm" ta="center">
+        Searching every page · <Kbd size="xs">⌘</Kbd>/<Kbd size="xs">Ctrl</Kbd>+<Kbd size="xs">F</Kbd>{' '}
+        finds text or regex inside the open page
+      </Text>
     </Modal>
   );
 }

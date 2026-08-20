@@ -12,6 +12,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { api } from '../lib/api.js';
+import { focusEditor, focusFileTree } from '../lib/vimFocus.js';
 import PageTree from './PageTree.jsx';
 import SearchModal from './SearchModal.jsx';
 
@@ -43,6 +44,27 @@ export default function Layout({ children }) {
   const slug = pathname.startsWith('/s/') ? pathname.split('/')[2] : null;
 
   useHotkeys([['mod+K', () => searchHandlers.open()]]);
+
+  // Vim's window motions, scaled down to the two panes this app has: Ctrl+H to
+  // the page tree, Ctrl+L back to the document. Capture phase, because in
+  // normal mode the editor is swallowing keystrokes of its own.
+  const vim = preferences.keymap === 'vim';
+  useEffect(() => {
+    if (!vim) return undefined;
+    const handler = (e) => {
+      if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        navHandlers.open();
+        focusFileTree();
+      } else if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        focusEditor();
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [vim, navHandlers]);
 
   const loadSpaces = useCallback(async () => {
     const data = await api.get('/api/spaces');

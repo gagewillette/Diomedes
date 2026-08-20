@@ -10,8 +10,17 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { api, emitPagesChanged, onPagesChanged } from '../lib/api.js';
+import { useAuth } from '../lib/AuthContext.jsx';
+import { focusEditor, onFocusFileTree } from '../lib/vimFocus.js';
+import { jumpParent, moveDown, moveUp } from './vimTreeNav.js';
 import PagePicker from './PagePicker.jsx';
 import { markdownToJSON } from '../lib/markdown.js';
+import { dragState, dropIntent } from '../lib/pageDrag.js';
+
+// How long a collapsed page has to be hovered before it opens to accept a drop
+// inside it. Long enough that dragging *past* a page never disturbs the tree,
+// short enough that aiming for a grandchild is not a chore.
+const HOVER_EXPAND_MS = 550;
 
 // Pull a leading `# Heading` off the markdown so it can seed the page title
 // instead of being duplicated in the body.
@@ -28,6 +37,9 @@ export default function PageTree({ space }) {
   const [pages, setPages] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
   const [reparenting, setReparenting] = useState(null); // page whose parent is being chosen
+  const [dragging, setDragging] = useState(null); // id of the page this tree is dragging
+  const [dropAt, setDropAt] = useState(null); // { id, zone } | { id: null, zone: 'root' }
+  const hoverTimer = useRef(null);
   const [importParent, setImportParent] = useState(null);
   const [importDoc, setImportDoc] = useState(null); // { body, fallbackTitle }
   const [importName, setImportName] = useState('');
@@ -38,6 +50,14 @@ export default function PageTree({ space }) {
   const pathParts = pathname.split('/');
   const activePageId = pathParts[3] === 'p' ? pathParts[4] : null;
   const canWrite = ['admin', 'writer'].includes(space.my_role);
+  const { preferences } = useAuth();
+  const vim = preferences.keymap === 'vim';
+  // Ctrl+H lands in the tree of the space you are reading, not in whichever
+  // other space happens to be open in the sidebar.
+  const isCurrentSpace = pathParts[2] === space.slug;
+  const treeRef = useRef(null);
+  const [cursorId, setCursorId] = useState(null);
+  const [keyboardFocus, setKeyboardFocus] = useState(false);
 
   const load = useCallback(async () => {
     const data = await api.get(`/api/spaces/${space.id}/pages`);
@@ -76,6 +96,64 @@ export default function PageTree({ space }) {
     setExpanded(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePageId, pages]);
+
+  // Ctrl+H: take focus, starting from the page being read.
+  useEffect(() => {
+    if (!vim || !isCurrentSpace) return undefined;
+    return onFocusFileTree(() => {
+      setCursorId((current) => current || activePageId || null);
+      treeRef.current?.focus({ preventScroll: true });
+    });
+  }, [vim, isCurrentSpace, activePageId]);
+
+  // Follow the route: opening a page from anywhere puts the cursor on it.
+  useEffect(() => {
+    if (vim && activePageId) setCursorId(activePageId);
+  }, [vim, activePageId]);
+
+  // Keep the cursor row on screen as it walks past the edge of the sidebar.
+  useEffect(() => {
+    if (!vim || !cursorId || !keyboardFocus) return;
+    treeRef.current
+      ?.querySelector(`[data-page-id="${cursorId}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [vim, cursorId, keyboardFocus, expanded, pages]);
+
+  const applyMove = (move) => {
+    if (!move) return;
+    if (move.expand.length) setExpanded((s) => new Set([...s, ...move.expand]));
+    setCursorId(move.id);
+  };
+
+  const onTreeKeyDown = (e) => {
+    if (!vim || e.metaKey || e.ctrlKey || e.altKey) return;
+    const cursor = cursorId || activePageId;
+    switch (e.key) {
+      case 'j':
+        applyMove(moveDown(childrenOf, expanded, cursor));
+        break;
+      case 'k':
+        applyMove(moveUp(childrenOf, expanded, cursor));
+        break;
+      case '}':
+        applyMove(jumpParent(childrenOf, pages, cursor, 1));
+        break;
+      case '{':
+        applyMove(jumpParent(childrenOf, pages, cursor, -1));
+        break;
+      case 'Enter':
+        if (cursor) navigate(`/s/${space.slug}/p/${cursor}`);
+        break;
+      case 'Escape':
+        treeRef.current?.blur();
+        focusEditor();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   const createPage = async (parentId = null) => {
     try {
@@ -139,20 +217,193 @@ export default function PageTree({ space }) {
     }
   };
 
+  // The tree's own list of a page's siblings, minus the page itself — the same
+  // list the server rebuilds when it resolves an index, so "put it third" means
+  // the same thing on both ends.
+  const siblingsWithout = useCallback(
+    (parentId, excludeId) =>
+      (childrenOf.get(parentId || 'root') || []).filter((p) => p.id !== excludeId),
+    [childrenOf]
+  );
+
+  // ---- dragging ----
+
+  const clearHoverTimer = () => {
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+
+  const endDrag = useCallback(() => {
+    clearHoverTimer();
+    dragState.current = null;
+    setDragging(null);
+    setDropAt(null);
+  }, []);
+
+  // `dragend` only fires on the element the drag started from, so a tree that
+  // merely showed a drop hint for someone else's page would keep it forever.
+  useEffect(() => {
+    const clear = () => {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+      setDragging(null);
+      setDropAt(null);
+    };
+    window.addEventListener('dragend', clear);
+    window.addEventListener('drop', clear);
+    return () => {
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('drop', clear);
+    };
+  }, []);
+
+  const onDragStart = (page) => (e) => {
+    // Descendants travel with the page, so they are also the set it can never
+    // be dropped into. Collected up front: the tree that owns them is not
+    // necessarily the tree being dragged over.
+    const descendants = new Set([page.id]);
+    const walk = (id) => {
+      for (const child of childrenOf.get(id) || []) {
+        descendants.add(child.id);
+        walk(child.id);
+      }
+    };
+    walk(page.id);
+
+    dragState.current = {
+      pageId: page.id,
+      spaceId: space.id,
+      title: page.title || 'Untitled',
+      blockedIds: descendants,
+    };
+    setDragging(page.id);
+    e.dataTransfer.effectAllowed = 'move';
+    // A plain-text payload keeps the cursor showing a move rather than the
+    // "no drop" badge in browsers that want *some* data on the transfer.
+    e.dataTransfer.setData('text/plain', page.title || 'Untitled');
+  };
+
+  // Hovering a collapsed page opens it, so a drop can be aimed at a child
+  // without breaking the drag to click the chevron first.
+  const scheduleExpand = (page) => {
+    if (expanded.has(page.id) || !(childrenOf.get(page.id) || []).length) return;
+    if (hoverTimer.current) return;
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = null;
+      setExpanded((s) => new Set([...s, page.id]));
+    }, HOVER_EXPAND_MS);
+  };
+
+  const onDragOverRow = (page) => (e) => {
+    const drag = dragState.current;
+    if (!drag || !canWrite) return;
+    // A page cannot land on itself, and landing beside or inside one of its own
+    // descendants would cut the branch out of the tree entirely — the parent
+    // chain would loop and nothing would ever render it again.
+    if (drag.blockedIds.has(page.id)) return;
+    const zone = dropIntent(e.currentTarget.getBoundingClientRect(), e.clientY);
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (zone === 'inside') scheduleExpand(page);
+    else clearHoverTimer();
+    setDropAt((prev) => (prev?.id === page.id && prev.zone === zone ? prev : { id: page.id, zone }));
+  };
+
+  // `dragleave` also fires on the way into a child element, so the hint is only
+  // dropped when the cursor has genuinely left the row — otherwise it would
+  // flicker off every time the pointer crossed the page's own label.
+  const onDragLeaveRow = (page) => (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    clearHoverTimer();
+    setDropAt((prev) => (prev?.id === page.id ? null : prev));
+  };
+
+  const onDropRow = (page) => (e) => {
+    const drag = dragState.current;
+    if (!drag || !canWrite || drag.blockedIds.has(page.id)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zone = dropIntent(e.currentTarget.getBoundingClientRect(), e.clientY);
+
+    if (zone === 'inside') {
+      commitMove(drag, { parentId: page.id, index: siblingsWithout(page.id, drag.pageId).length });
+      setExpanded((s) => new Set([...s, page.id]));
+      return;
+    }
+    const siblings = siblingsWithout(page.parent_id, drag.pageId);
+    const at = siblings.findIndex((s) => s.id === page.id);
+    commitMove(drag, {
+      parentId: page.parent_id || null,
+      index: at < 0 ? siblings.length : at + (zone === 'after' ? 1 : 0),
+    });
+  };
+
+  // The strip below the last root page: the only way to say "top level of this
+  // space, at the end", which is otherwise unreachable once every root page is
+  // occupied by its own before/after zones.
+  const onDragOverRoot = (e) => {
+    if (!dragState.current || !canWrite) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearHoverTimer();
+    setDropAt((prev) => (prev?.zone === 'root' ? prev : { id: null, zone: 'root' }));
+  };
+
+  const onDropRoot = (e) => {
+    const drag = dragState.current;
+    if (!drag || !canWrite) return;
+    e.preventDefault();
+    commitMove(drag, { parentId: null, index: siblingsWithout(null, drag.pageId).length });
+  };
+
+  const commitMove = (drag, { parentId, index }) => {
+    endDrag();
+    const crossSpace = drag.spaceId !== space.id;
+    act(async () => {
+      await api.post(`/api/pages/${drag.pageId}/move`, {
+        parentId,
+        index,
+        spaceId: space.id,
+      });
+      // A cross-space move empties a slot in a tree this component does not
+      // own, so both sides have to be told; same-space moves are covered by the
+      // caller's own emit.
+      if (crossSpace) emitPagesChanged(drag.spaceId);
+    });
+  };
+
+  const rowDropClass = (pageId) =>
+    dropAt?.id === pageId ? `is-drop-${dropAt.zone}` : '';
+
   const renderNode = (page, depth) => {
     const kids = childrenOf.get(page.id) || [];
     const isOpen = expanded.has(page.id);
     const siblings = childrenOf.get(page.parent_id || 'root') || [];
     const idx = siblings.findIndex((s) => s.id === page.id);
     const byId = new Map(pages.map((p) => [p.id, p]));
+    const reorder = (index) =>
+      act(() => api.post(`/api/pages/${page.id}/move`, { parentId: page.parent_id || null, index }));
 
     return (
       <div key={page.id}>
         <Group
           gap={2}
           wrap="nowrap"
-          className={`gd-tree-row ${page.id === activePageId ? 'is-active' : ''}`}
+          data-page-id={page.id}
+          className={[
+            'gd-tree-row',
+            page.id === activePageId ? 'is-active' : '',
+            dragging === page.id ? 'is-dragging' : '',
+            rowDropClass(page.id),
+            vim && keyboardFocus && page.id === (cursorId || activePageId) ? 'is-vim-cursor' : '',
+          ].filter(Boolean).join(' ')}
           style={{ paddingLeft: 4 + depth * 14 }}
+          draggable={canWrite}
+          onDragStart={canWrite ? onDragStart(page) : undefined}
+          onDragEnd={endDrag}
+          onDragOver={onDragOverRow(page)}
+          onDragLeave={onDragLeaveRow(page)}
+          onDrop={onDropRow(page)}
         >
           <ActionIcon
             size="xs" variant="subtle" color="gray"
@@ -170,7 +421,10 @@ export default function PageTree({ space }) {
           <UnstyledButton
             className="gd-tree-label"
             title={page.title || 'Untitled'}
-            onClick={() => navigate(`/s/${space.slug}/p/${page.id}`)}
+            onClick={() => {
+              setCursorId(page.id);
+              navigate(`/s/${space.slug}/p/${page.id}`);
+            }}
           >
             <Group gap={6} wrap="nowrap">
               <span className="gd-tree-icon">
@@ -202,19 +456,18 @@ export default function PageTree({ space }) {
                     Rename
                   </Menu.Item>
                   <Menu.Divider />
+                  {/* Slots, not sort keys: the server places the page among the
+                      siblings it can see, so these agree with a drag that
+                      landed in the same gap a moment earlier. */}
                   <Menu.Item
                     leftSection={<IconArrowUp size={14} />} disabled={idx <= 0}
-                    onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, {
-                      parentId: page.parent_id, position: siblings[idx - 1].position - 1,
-                    }))}
+                    onClick={() => reorder(idx - 1)}
                   >
                     Move up
                   </Menu.Item>
                   <Menu.Item
                     leftSection={<IconArrowDown size={14} />} disabled={idx === siblings.length - 1}
-                    onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, {
-                      parentId: page.parent_id, position: siblings[idx + 1].position + 1,
-                    }))}
+                    onClick={() => reorder(idx + 1)}
                   >
                     Move down
                   </Menu.Item>
@@ -260,7 +513,16 @@ export default function PageTree({ space }) {
 
   const roots = childrenOf.get('root') || [];
   return (
-    <div className="gd-tree">
+    <div
+      className={`gd-tree ${vim && keyboardFocus ? 'is-vim-focus' : ''}`}
+      ref={treeRef}
+      tabIndex={vim ? -1 : undefined}
+      onKeyDown={vim ? onTreeKeyDown : undefined}
+      onFocus={vim ? () => setKeyboardFocus(true) : undefined}
+      onBlur={vim ? (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setKeyboardFocus(false);
+      } : undefined}
+    >
       <input
         ref={importInputRef} type="file" accept=".md,.markdown,.txt" hidden
         onChange={(e) => {
@@ -298,9 +560,16 @@ export default function PageTree({ space }) {
       />
       {roots.map((p) => renderNode(p, 0))}
       {canWrite && (
-        <UnstyledButton className="gd-tree-add" onClick={() => createPage(null)}>
-          <Group gap={6}><IconPlus size={13} /><Text size="xs">New page</Text></Group>
-        </UnstyledButton>
+        <div
+          className={`gd-tree-root-drop ${dropAt?.zone === 'root' ? 'is-drop-root' : ''}`}
+          onDragOver={onDragOverRoot}
+          onDragLeave={() => setDropAt((prev) => (prev?.zone === 'root' ? null : prev))}
+          onDrop={onDropRoot}
+        >
+          <UnstyledButton className="gd-tree-add" onClick={() => createPage(null)}>
+            <Group gap={6}><IconPlus size={13} /><Text size="xs">New page</Text></Group>
+          </UnstyledButton>
+        </div>
       )}
     </div>
   );
