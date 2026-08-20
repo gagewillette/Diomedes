@@ -322,7 +322,9 @@ export default function Editor({
     pointers: livePointers,
   });
   useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
-  useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
+  useContentSnapshot({
+    session: collab, editor, pageId, canWrite: editable, onSaveState, initialContent: content,
+  });
 
   const smoothCaret = editable && preferences.smoothCaret;
 

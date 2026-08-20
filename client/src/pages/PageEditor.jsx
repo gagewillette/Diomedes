@@ -360,6 +360,7 @@ export default function PageEditor() {
         exclude={pageId}
         rootLabel="No parent (top level)"
         onlySpace
+        topLevelOnly
       />
       <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
       <HistoryModal

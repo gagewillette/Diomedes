@@ -48,7 +48,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Favorites / starred pages | ✅ |
 | Recently updated pages | ✅ Home dashboard |
 | PDF export / printing | ✅ Print stylesheet (browser Print → PDF) |
-| Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse). Notion/Confluence zips ➖ |
+| Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse), into a space or under a top-level page. Notion/Confluence zips ➖ |
 | Export: Markdown / HTML | ✅ Per-page export to .md and .html |
 | Public page sharing via link | ✅ Token links, revocable, read-only, no login needed |
 | Translations (10+ languages) | ➖ English only |
@@ -60,7 +60,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
-| Nested page tree with reordering | ✅ Infinite nesting, move up/down/indent/outdent + move-to-space |
+| Nested page tree with reordering | ✅ One level of subpages, move up/down/indent/outdent + move-to-space. Deeper nesting is tracked as its own feature |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |
 | Space roles (Full access / Can edit / Can view) | ✅ admin / writer / reader per space, set by admins |

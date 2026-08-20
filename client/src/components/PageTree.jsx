@@ -117,8 +117,15 @@ export default function PageTree({ space }) {
     const title = importName.trim() || importDoc.fallbackTitle || 'Untitled';
     setImporting(true);
     try {
-      const d = await api.post('/api/pages', { spaceId: space.id, parentId: importParent, title });
-      await api.patch(`/api/pages/${d.page.id}`, { content: markdownToJSON(importDoc.body), title });
+      // One request: the page comes into existence with its body already in
+      // place, so the editor cannot open it during the window where it exists
+      // but is still empty.
+      const d = await api.post('/api/pages', {
+        spaceId: space.id,
+        parentId: importParent,
+        title,
+        content: markdownToJSON(importDoc.body),
+      });
       emitPagesChanged(space.id);
       if (importParent) setExpanded((s) => new Set([...s, importParent]));
       closeImport();
@@ -145,6 +152,10 @@ export default function PageTree({ space }) {
     const siblings = childrenOf.get(page.parent_id || 'root') || [];
     const idx = siblings.findIndex((s) => s.id === page.id);
     const byId = new Map(pages.map((p) => [p.id, p]));
+    // Only top-level pages take children, and only a childless page can become
+    // one — the server enforces the same rule.
+    const canNest = !page.parent_id;
+    const canBeNested = !page.parent_id && kids.length === 0;
 
     return (
       <div key={page.id}>
@@ -183,12 +194,18 @@ export default function PageTree({ space }) {
                   <ActionIcon size="xs" variant="subtle" color="gray"><IconDots size={13} /></ActionIcon>
                 </Menu.Target>
                 <Menu.Dropdown>
-                  <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
-                    New subpage
-                  </Menu.Item>
-                  <Menu.Item leftSection={<IconFileImport size={14} />} onClick={() => pickImportFile(page.id)}>
-                    Import markdown file
-                  </Menu.Item>
+                  {/* The tree is one level deep, so a subpage takes no children
+                      of its own — neither created nor imported. */}
+                  {canNest && (
+                    <>
+                      <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => createPage(page.id)}>
+                        New subpage
+                      </Menu.Item>
+                      <Menu.Item leftSection={<IconFileImport size={14} />} onClick={() => pickImportFile(page.id)}>
+                        Import markdown file
+                      </Menu.Item>
+                    </>
+                  )}
                   <Menu.Item
                     leftSection={<IconPencil size={14} />}
                     onClick={() => {
@@ -216,7 +233,7 @@ export default function PageTree({ space }) {
                     Move down
                   </Menu.Item>
                   <Menu.Item
-                    leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0}
+                    leftSection={<IconIndentIncrease size={14} />} disabled={idx <= 0 || !canBeNested}
                     onClick={() => act(() => api.post(`/api/pages/${page.id}/move`, { parentId: siblings[idx - 1].id }))}
                   >
                     Nest under previous
@@ -292,6 +309,7 @@ export default function PageTree({ space }) {
         exclude={reparenting?.id}
         rootLabel="No parent (top level)"
         onlySpace
+        topLevelOnly
       />
       {roots.map((p) => renderNode(p, 0))}
       {canWrite && (
