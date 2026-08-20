@@ -26,6 +26,7 @@ import { Markdown } from 'tiptap-markdown';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
+import { trackedUpload } from '../lib/uploadStore.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { FONT_STACKS } from '../lib/prefs.js';
 import SmoothCaret from './SmoothCaret.jsx';
@@ -227,7 +228,7 @@ export default function Editor({
         try {
           const fd = new FormData();
           fd.append('file', file);
-          const res = await api.post(`/api/pages/${pageId}/attachments`, fd);
+          const res = await trackedUpload(`/api/pages/${pageId}/attachments`, file, fd);
           return res.url;
         } catch (err) {
           notifications.show({ color: 'red', message: `Upload failed: ${err.message}` });

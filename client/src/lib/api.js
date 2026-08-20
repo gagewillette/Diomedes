@@ -61,6 +61,42 @@ export const api = {
   del: (url, opts) => request('DELETE', url, undefined, opts),
 };
 
+// `fetch` has no upload-progress event, so byte-level progress needs XHR.
+// Used for file uploads only — everything else goes through `request` above.
+export function postWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let data = null;
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* non-json response */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        if (xhr.status === 401 && !location.pathname.startsWith('/login')) {
+          const from = location.pathname + location.search;
+          if (!location.pathname.startsWith('/share/')) {
+            location.assign(`/login?from=${encodeURIComponent(from)}`);
+          }
+        }
+        const err = new Error(data?.error || `Request failed (${xhr.status})`);
+        err.status = xhr.status;
+        reject(err);
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.onabort = () => reject(new Error('Upload cancelled'));
+    xhr.send(formData);
+  });
+}
+
 // Tiny pub/sub so the sidebar tree refreshes when pages change elsewhere.
 export function emitPagesChanged(spaceId) {
   window.dispatchEvent(new CustomEvent('pages-changed', { detail: { spaceId } }));
