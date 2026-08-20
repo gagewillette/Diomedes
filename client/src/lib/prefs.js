@@ -32,22 +32,25 @@ export const KEYMAP_LABELS = {
   vim: 'Vim',
 };
 
-export const VIM_CHALLENGE = 'How do you quit Vim without saving?';
+export const VIM_CHALLENGE = 'How do you quit Vim?';
 
 /**
  * The gate in front of vim mode. Someone who cannot get out of vim unaided is
  * better off not being dropped into normal mode mid-sentence, so switching the
  * emulation on costs one correct answer.
  *
- * Accepts the ex commands and the ZQ shorthand. A leading ':' is optional —
+ * The question is "how do you quit", not "how do you discard your changes", so
+ * both `:q` and `:q!` count — asking for the bang specifically failed people
+ * who gave the answer everyone actually means. The `:x`/`ZZ` write-and-quit
+ * pair counts too; they also get you out. A leading ':' is optional, since
  * people type the command the way they would from normal mode.
  */
 export function isVimQuitAnswer(input) {
   const raw = String(input ?? '').trim();
   if (!raw) return false;
-  if (/^zq$/i.test(raw)) return true;
+  if (/^z[qz]$/i.test(raw)) return true;
   const cmd = raw.replace(/^:+/, '').replace(/\s+/g, '').toLowerCase();
-  return /^(q|quit|qa|qall|quita|quitall)!$/.test(cmd);
+  return /^(q|quit|qa|qall|quita|quitall|wq|wqa|x|xa|xit|exi|exit)!?$/.test(cmd);
 }
 
 export const mergePrefs = (stored) => ({ ...DEFAULT_PREFS, ...(stored || {}) });
