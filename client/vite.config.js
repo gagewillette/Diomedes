@@ -15,6 +15,13 @@ export default defineConfig({
       '/api': 'http://localhost:3000',
     },
   },
+  // The lint worker (src/editor/code/lintWorker.js) lazily imports one parser
+  // per language, so it is a code-splitting build — and rollup cannot split an
+  // IIFE, which is vite's default worker format. The worker is already spawned
+  // with `{ type: 'module' }`, so ES is both required and correct.
+  worker: {
+    format: 'es',
+  },
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 3000,

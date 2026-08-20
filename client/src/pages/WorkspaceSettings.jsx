@@ -3,11 +3,12 @@ import {
   Container, Title, Paper, Stack, Text, Switch, Group, Alert, Badge, Slider, Anchor,
   TextInput, Button,
 } from '@mantine/core';
-import { IconInfoCircle, IconPointer, IconUpload, IconGauge } from '@tabler/icons-react';
+import { IconInfoCircle, IconPointer, IconUpload, IconGauge, IconCode, IconAlertTriangle } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { WORKSPACE_NAME_MAX } from '../lib/workspace.js';
+import { WORKSPACE_NAME_MAX, CODE_MAX_BYTES_MIN, CODE_MAX_BYTES_MAX } from '../lib/workspace.js';
+import { formatBytes } from '../lib/format.js';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
 
 /**
@@ -17,13 +18,16 @@ import { useDocumentIdentity } from '../lib/documentTitle.js';
 export default function WorkspaceSettings() {
   const {
     workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance,
-    updateWorkspaceName, isAdmin,
+    codeIntelligence, updateCodeIntelligence, updateWorkspaceName, isAdmin,
   } = useAuth();
   useDocumentIdentity(`${workspaceName} settings`, '⚙️');
   const [saving, setSaving] = useState(null);
   // The slider is dragged locally and only written on release; every drag step
   // would otherwise be a PATCH and an SSE fan-out to every browser.
   const [rate, setRate] = useState(performanceSettings.sampleRate);
+  // Same reason as the sample rate: written on release, not on every drag step.
+  const [maxBytes, setMaxBytes] = useState(codeIntelligence.maxBytes);
+  useEffect(() => setMaxBytes(codeIntelligence.maxBytes), [codeIntelligence.maxBytes]);
   // Draft name, written on Save. It follows the workspace name whenever that
   // changes underneath us — another admin renaming it, or /api/auth/me landing
   // after this screen has already mounted.
@@ -184,6 +188,84 @@ export default function WorkspaceSettings() {
                 ]}
                 onChange={setRate}
                 onChangeEnd={(v) => save('sampleRate', () => updatePerformance({ sampleRate: v }))}
+                mb="lg"
+              />
+            </div>
+          )}
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" mt="md">
+        <Stack>
+          <div>
+            <Group gap={6}>
+              <Text fw={700} size="sm">Code blocks</Text>
+              <Badge
+                size="xs"
+                variant="light"
+                color={codeIntelligence.highlighting || codeIntelligence.linting ? 'green' : 'gray'}
+              >
+                {codeIntelligence.highlighting || codeIntelligence.linting ? 'On' : 'Off'}
+              </Badge>
+            </Group>
+            <Text size="xs" c="dimmed">
+              Syntax colouring and per-language checking inside code blocks. The checking runs
+              in your browser, so turning it off is the compute equivalent of data savings —
+              no code is sent anywhere either way.
+            </Text>
+          </div>
+
+          <Switch
+            label={
+              <Group gap={6}>
+                <IconCode size={14} />
+                <span>Turn off syntax highlighting</span>
+              </Group>
+            }
+            description="Code blocks render as plain monospaced text. No language grammars are downloaded at all. The cheapest option on old machines and on very long pages."
+            checked={!codeIntelligence.highlighting}
+            disabled={!isAdmin || saving === 'highlighting'}
+            onChange={(e) =>
+              save('highlighting', () => updateCodeIntelligence({ highlighting: !e.currentTarget.checked }))
+            }
+          />
+
+          <Switch
+            label={
+              <Group gap={6}>
+                <IconAlertTriangle size={14} />
+                <span>Turn off code checking</span>
+              </Group>
+            }
+            description="Stops parsing code blocks and showing errors inside them. Highlighting is unaffected. Diagnostics are never part of the page — they are drawn in the reader's browser and never saved, shared or put in page history."
+            checked={!codeIntelligence.linting}
+            disabled={!isAdmin || saving === 'linting'}
+            onChange={(e) =>
+              save('linting', () => updateCodeIntelligence({ linting: !e.currentTarget.checked }))
+            }
+          />
+
+          {codeIntelligence.linting && (
+            <div>
+              <Text size="sm" fw={500}>Skip blocks larger than — {formatBytes(maxBytes)}</Text>
+              <Text size="xs" c="dimmed" mb="xs">
+                Big blocks are still coloured, just never parsed. Turn it down if people paste
+                large dumps into pages.
+              </Text>
+              <Slider
+                min={CODE_MAX_BYTES_MIN}
+                max={CODE_MAX_BYTES_MAX}
+                step={10_000}
+                value={maxBytes}
+                disabled={!isAdmin || saving === 'maxBytes'}
+                label={(v) => formatBytes(v)}
+                marks={[
+                  { value: CODE_MAX_BYTES_MIN, label: '10 KB' },
+                  { value: 500_000, label: '500 KB' },
+                  { value: CODE_MAX_BYTES_MAX, label: '1 MB' },
+                ]}
+                onChange={setMaxBytes}
+                onChangeEnd={(v) => save('maxBytes', () => updateCodeIntelligence({ maxBytes: v }))}
                 mb="lg"
               />
             </div>
