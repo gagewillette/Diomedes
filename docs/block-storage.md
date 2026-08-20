@@ -149,6 +149,36 @@ pages sharing a position and the sibling order becoming undefined.
 Order keys are scoped to a sibling list, so two pages under different parents
 sharing the key `a0` is normal and correct.
 
+### Reordering blocks
+
+The drag handle (`client/src/editor/blockDrag.js`) writes no order key at all.
+It puts the block under the pointer into a ProseMirror `NodeSelection` and hands
+the editor a `move: true` drag; the drop applies one transaction that deletes
+the block and reinserts it, so the block keeps its id and the page saves through
+the same `PATCH` as any other edit.
+
+Everything about ordering then happens server-side, in `assignOrderKeys`. It
+keeps the **longest increasing subsequence** of the stored keys and mints new
+ones only for the blocks between them:
+
+```
+stored   a0   a1   a2   a3   …  a9        (ten blocks)
+dragged  a9   a0   a1   a2   …  a8        (the last one moved to the top)
+                └── kept: nine keys already in the right order
+         └────── rewritten: one key, `generateKeyBetween(null, 'a0')`
+```
+
+Keeping keys greedily from the left instead would keep `a9` — the one block that
+did move — and rewrite the other nine, and since a rewritten row takes the new
+page `rev`, a reorder that changed no text would report nine changed blocks to
+`/delta` and hand the embedding queue nine blocks to re-embed. The subsequence
+is what makes a one-block drag cost one row, which is the promise the encoding
+was chosen for.
+
+Alt+Shift+↑/↓ moves the block holding the cursor and goes through exactly the
+same path — the handle is one way to produce a reordered document, not a second
+write path.
+
 ## 5. Block-scoped embedding
 
 `page_chunks.source_block_ids` records which blocks each chunk was built from.

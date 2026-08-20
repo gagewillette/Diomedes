@@ -20,6 +20,41 @@
   pointer-events: none;
   z-index: 80;
 }
+/* ---------- block drag handle ---------- */
+/* The positioning context for the handle: the element EditorContent renders
+   around the ProseMirror node. blockDrag.js adds the class. */
+.gd-block-handle-host { position: relative; }
+.gd-block-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--mantine-color-dimmed);
+  font-size: 15px;
+  line-height: 20px;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.55;
+  transition: opacity 120ms ease, background-color 120ms ease;
+  z-index: 70;
+}
+.gd-block-handle:hover {
+  opacity: 1;
+  background: var(--mantine-color-default-hover);
+}
+.gd-block-handle:active { cursor: grabbing; }
+/* Once the drag is running the handle would only follow the pointer around
+   under the drag image. */
+.is-block-dragging .gd-block-handle { display: none !important; }
+/* Narrow screens have no gutter to put it in. */
+@media (max-width: 768px) {
+  .gd-block-handle { display: none !important; }
+}
+
 .gd-caret-hidden .gd-editor { caret-color: transparent; }
 .gd-smooth-caret {
   position: absolute;
