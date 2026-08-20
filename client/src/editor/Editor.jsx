@@ -22,7 +22,7 @@ import Mathematics from '@tiptap/extension-mathematics';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -38,6 +38,9 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
+import { useDocumentUpload } from './useDocumentUpload.jsx';
+import { useFileDrop } from './useFileDrop.js';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
 import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
@@ -51,7 +54,7 @@ const lowlight = createLowlight(common);
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, placeholder = "Type '/' for commands…", collab, me }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me }) {
   return [
     StarterKit.configure({
       codeBlock: false,
@@ -95,7 +98,7 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
         render: makeSuggestionRender(MentionList),
       },
     }),
-    SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
+    SlashCommand.configure({ items: buildSlashItems({ uploadFile, uploadDocument }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
     ...(collab
@@ -109,8 +112,19 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
           }),
         ]
       : []),
+    DocumentBlock,
   ];
 }
+
+/** documentBlock attrs from a POST /pages/:id/documents response. */
+export const documentAttrs = (res) => ({
+  attachmentId: res.attachment.id,
+  url: res.url,
+  filename: res.attachment.filename,
+  mime: res.attachment.mime,
+  size: res.attachment.size,
+  kind: res.docKind,
+});
 
 export default function Editor({
   content,
@@ -139,6 +153,13 @@ export default function Editor({
       }
     : null;
 
+  const { uploadDocument, prompt: documentPrompt } = useDocumentUpload(editable ? pageId : null);
+  // The editor's extensions are built once, so reach the current callback
+  // through a ref rather than baking in the one from the first render.
+  const uploadDocumentRef = useRef(uploadDocument);
+  uploadDocumentRef.current = uploadDocument;
+  const uploadDocumentStable = useCallback((file) => uploadDocumentRef.current?.(file) ?? null, []);
+
   // The [[link]] suggestion plugin runs outside React, so hand it the current
   // space through the module-level context before the editor can be typed in.
   linkContext.spaceId = space?.id ?? null;
@@ -148,10 +169,16 @@ export default function Editor({
   // The extension list is built once per session: TipTap binds Collaboration to
   // a specific Y.Doc at creation time, and rebuilding it would drop the binding.
   const extensions = useMemo(
-    () => buildExtensions({ uploadFile, collab, me }),
+    () =>
+      buildExtensions({
+        uploadFile,
+        uploadDocument: pageId && editable ? uploadDocumentStable : null,
+        collab,
+        me,
+      }),
     // ydoc/provider identity, not the session object: the session re-wraps on
     // every connection-status change and rebuilding the list would be pointless.
-    [collab?.ydoc, collab?.provider, me] // eslint-disable-line react-hooks/exhaustive-deps
+    [collab?.ydoc, collab?.provider, me, pageId, editable, uploadDocumentStable] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const editor = useEditor({
@@ -163,30 +190,12 @@ export default function Editor({
     onUpdate: ({ editor: e }) => onUpdate?.(e),
     editorProps: {
       attributes: { class: 'gd-editor' },
-      handleDrop: (view, event, _slice, moved) => {
-        if (moved || !uploadFile || !event.dataTransfer?.files?.length) return false;
-        event.preventDefault();
-        const files = Array.from(event.dataTransfer.files);
-        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url, coords?.pos);
-          }
-        })();
-        return true;
-      },
-      handlePaste: (view, event) => {
+      // Drops are handled by useFileDrop on the wrapper, not here — see the
+      // comment there for why ProseMirror's own drop path can't be trusted
+      // with files.
+      handlePaste: (_view, event) => {
         if (!uploadFile || !event.clipboardData?.files?.length) return false;
-        const files = Array.from(event.clipboardData.files);
-        (async () => {
-          for (const file of files) {
-            const url = await uploadFile(file);
-            if (!url) continue;
-            insertUploaded(view, file, url);
-          }
-        })();
+        handleFiles(Array.from(event.clipboardData.files));
         return true;
       },
     },
@@ -204,6 +213,40 @@ export default function Editor({
     api.get('/api/users', { noRedirect: true }).then((d) => { userCache = d.users; }).catch(() => {});
   }, []);
 
+  // Dropped/pasted files, one at a time so a PPTX can stop and ask how it
+  // should be stored. `pos` is the drop point; each insertion moves it along so
+  // a multi-file drop keeps its order.
+  async function handleFiles(files, pos) {
+    const view = editor?.view;
+    if (!view) return;
+    let at = pos;
+    for (const file of files) {
+      // A PDF or PPTX becomes a document card — the same one /document makes.
+      if (docKindFor(file)) {
+        const res = await uploadDocumentRef.current?.(file);
+        if (!res) continue;
+        at = insertDocument(at, res);
+      } else if (uploadFile) {
+        const url = await uploadFile(file);
+        if (!url) continue;
+        at = insertUploaded(view, file, url, at);
+      }
+    }
+  }
+
+  // The bar is a block node and always sits on its own line. Returns the
+  // position just after it, for the next file in the batch.
+  function insertDocument(pos, res) {
+    const at = Math.min(pos ?? editor.state.selection.from, editor.state.doc.content.size);
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(at, { type: 'documentBlock', attrs: documentAttrs(res) })
+      .run();
+    return editor.state.selection.to;
+  }
+
+  // Returns the position just after the insertion, for the next file.
   function insertUploaded(view, file, url, pos) {
     const { schema } = view.state;
     let node;
@@ -215,9 +258,17 @@ export default function Editor({
       node = para;
     }
     const tr = view.state.tr;
-    if (pos != null) tr.insert(pos, node);
-    else tr.replaceSelectionWith(node);
+    let end;
+    if (pos != null) {
+      const at = Math.min(pos, view.state.doc.content.size);
+      tr.insert(at, node);
+      end = at + node.nodeSize;
+    } else {
+      tr.replaceSelectionWith(node);
+      end = tr.selection.to;
+    }
     view.dispatch(tr);
+    return end;
   }
 
   const peers = usePresence({ session: collab, editor, me, wrapRef, canWrite: editable });
@@ -226,10 +277,19 @@ export default function Editor({
 
   const smoothCaret = editable && preferences.smoothCaret;
 
+  const { ref: dropRef, isOver } = useFileDrop({
+    editor,
+    enabled: Boolean(editor && editable && pageId),
+    onFiles: handleFiles,
+  });
+
   return (
     <div
-      ref={wrapRef}
-      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''}`}
+      ref={(node) => {
+        wrapRef.current = node;
+        dropRef.current = node;
+      }}
+      className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''} ${isOver ? 'is-file-drop' : ''}`}
       style={{
         '--gd-font-family': FONT_STACKS[preferences.fontFamily] || FONT_STACKS.system,
         '--gd-font-size': `${preferences.fontSize}px`,
@@ -240,6 +300,7 @@ export default function Editor({
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
       {collab && <PointerLayer peers={peers} />}
+      {editable && documentPrompt}
     </div>
   );
 }
