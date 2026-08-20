@@ -76,6 +76,13 @@ Page `content` is TipTap/ProseMirror JSON (`{"type":"doc","content":[...]}`).
 Custom node types: `callout{variant}`, `toggleBlock{title,open}`, `mermaidDiagram{code}`,
 `excalidraw{data}`, `drawioDiagram{xml,svg}`, `iframeEmbed{src}`, `videoBlock{src}`.
 
+Mermaid diagrams are normalised on write: a `codeBlock` whose language is
+mermaid (case-insensitive, `mmd` included, info-string attributes ignored) is
+stored as a `mermaidDiagram{code}` node, as is an unlabelled code block whose
+body opens with a mermaid declaration (`graph TD`, `sequenceDiagram`, …). A
+client that sends markdown-derived JSON therefore gets a rendered, editable
+diagram rather than raw source in a code block.
+
 Every block-level node carries a `blockId` attribute. Clients that write documents
 are not required to supply one — the server mints ids for any block arriving
 without them and stores them back into the document — but a client that *does*
@@ -89,7 +96,7 @@ document with ids stripped makes every block look new. See
 | GET | `/api/spaces/:id/pages` | Tree metadata (id, parent_id, title, icon, order_key, rev), ordered by `order_key` |
 | POST | `/api/pages` | `{spaceId, parentId?, title?}` |
 | GET | `/api/pages/:id` | Full page + breadcrumbs + caller's role |
-| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex |
+| PATCH | `/api/pages/:id` | `{title?, icon?, content?}` — content triggers versioning, block reprojection and a scoped search reindex. Sent with an API token (MCP, scripts) it also drops the page's collaborative document, so the next reader rebuilds it from the JSON just written instead of being served the pre-write CRDT |
 | GET | `/api/pages/:id/blocks` | `{rev, blocks[]}` — the page's blocks in document order |
 | GET | `/api/pages/:id/delta?since=N` | What changed since revision `N`: `{rev, full, blocks[], deleted[], order[]}`. `full: true` means the gap is too wide to answer incrementally — refetch the page. |
 | POST | `/api/pages/:id/move` | `{parentId?, spaceId?, index?, orderKey?}` — `index` is the slot among the destination's children, resolved server-side; `spaceId` moves the subtree to another space (needs writer on both). `orderKey` is an explicit sort key for clients that compute one. A numeric `position` is still accepted and read as a slot index. |

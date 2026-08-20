@@ -260,6 +260,24 @@ router.patch(
     });
     notePageChanged(written.page.id, written.page.updated_at, written.changedBlockIds);
 
+    // A body written through an API token — the MCP server, a script — is a
+    // wholesale replacement that the CRDT cannot express as an edit, exactly
+    // like a version restore. If the page was ever opened in the editor, its
+    // stored ydoc still holds the old document and would be handed back to the
+    // next reader, so the write looks like it silently did nothing. Drop the
+    // doc and let the next client reseed from the JSON we just stored.
+    //
+    // Session-authenticated PATCHes are the editor's own snapshot writes and
+    // must not do this: the CRDT there is the source they came from.
+    if (content !== undefined && req.user.viaToken) {
+      await q('DELETE FROM page_ydoc WHERE page_id = $1', [page.id]);
+      await q(
+        'UPDATE pages SET collab_seeded = false, collab_seed_claimed_at = NULL WHERE id = $1',
+        [page.id]
+      );
+      await getHub()?.resetPage(page.id);
+    }
+
     if (content !== undefined) await syncPageLinks(page.id, written.content, page.space_id);
     if (title !== undefined && title !== page.title) {
       // A rename can both attract dangling links and orphan ones that had

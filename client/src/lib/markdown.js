@@ -11,6 +11,24 @@ import TaskItem from '@tiptap/extension-task-item';
 import { Markdown } from 'tiptap-markdown';
 import { BlockId } from '../editor/blockId.js';
 
+// The headless editor below has no Mermaid extension — it has no DOM to render
+// into — so a ```mermaid fence comes out of it as a code block. The server
+// normalises that on write, but the imported document is also shown before it
+// round-trips, so convert here too and let the two agree.
+const MERMAID_LANGUAGES = new Set(['mermaid', 'mmd']);
+
+function liftMermaid(node) {
+  if (!node || typeof node !== 'object') return node;
+  if (node.type === 'codeBlock') {
+    const first = String(node.attrs?.language || '').trim().split(/[\s,{:]/)[0].toLowerCase();
+    if (!MERMAID_LANGUAGES.has(first)) return node;
+    const code = (node.content || []).map((c) => c.text || '').join('');
+    return { type: 'mermaidDiagram', attrs: { code } };
+  }
+  if (!Array.isArray(node.content)) return node;
+  return { ...node, content: node.content.map(liftMermaid) };
+}
+
 // Parse a markdown string into TipTap JSON using a throwaway headless editor.
 export function markdownToJSON(md) {
   const editor = new Editor({
@@ -31,7 +49,7 @@ export function markdownToJSON(md) {
   });
   const json = editor.getJSON();
   editor.destroy();
-  return json;
+  return liftMermaid(json);
 }
 
 export function downloadFile(filename, content, mime = 'text/plain') {
