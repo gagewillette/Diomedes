@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Container, Title, Paper, Stack, Text, Switch, Group, Alert, Badge } from '@mantine/core';
-import { IconInfoCircle, IconPointer, IconUpload } from '@tabler/icons-react';
+import {
+  Container, Title, Paper, Stack, Text, Switch, Group, Alert, Badge, Slider, Anchor,
+} from '@mantine/core';
+import { IconInfoCircle, IconPointer, IconUpload, IconGauge } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
 
 /**
@@ -9,13 +12,17 @@ import { useAuth } from '../lib/AuthContext.jsx';
  * here applies to every member at once, so only owners and admins can change it.
  */
 export default function WorkspaceSettings() {
-  const { workspaceName, dataSavings, updateDataSavings, isAdmin } = useAuth();
+  const { workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance, isAdmin } =
+    useAuth();
   const [saving, setSaving] = useState(null);
+  // The slider is dragged locally and only written on release; every drag step
+  // would otherwise be a PATCH and an SSE fan-out to every browser.
+  const [rate, setRate] = useState(performanceSettings.sampleRate);
 
-  const toggle = async (key, enabled) => {
+  const save = async (key, run) => {
     setSaving(key);
     try {
-      await updateDataSavings({ [key]: enabled });
+      await run();
       notifications.show({ color: 'green', message: 'Workspace settings updated' });
     } catch (err) {
       notifications.show({ color: 'red', message: err.message });
@@ -23,6 +30,8 @@ export default function WorkspaceSettings() {
       setSaving(null);
     }
   };
+
+  const toggle = (key, enabled) => save(key, () => updateDataSavings({ [key]: enabled }));
 
   return (
     <Container size="sm" py="xl" className="gd-fade-in">
@@ -76,6 +85,64 @@ export default function WorkspaceSettings() {
             disabled={!isAdmin || saving === 'fileUploads'}
             onChange={(e) => toggle('fileUploads', !e.currentTarget.checked)}
           />
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" mt="md">
+        <Stack>
+          <div>
+            <Group gap={6}>
+              <Text fw={700} size="sm">Performance</Text>
+              {!performanceSettings.logging && (
+                <Badge size="xs" variant="light" color="gray">Off</Badge>
+              )}
+            </Group>
+            <Text size="xs" c="dimmed">
+              How long pages take to open, how long the server takes to answer, and how many
+              bytes move — computed on{' '}
+              <Anchor component={Link} to="/settings/workspace/info" size="xs">Workspace info</Anchor>.
+            </Text>
+          </div>
+
+          <Switch
+            label={
+              <Group gap={6}>
+                <IconGauge size={14} />
+                <span>Turn off performance logging</span>
+              </Group>
+            }
+            description="Stops the browser and the server from recording timing samples. Nothing new is measured and no new rows are written; the metrics already collected stay until they age out or you clear them."
+            checked={!performanceSettings.logging}
+            disabled={!isAdmin || saving === 'logging'}
+            onChange={(e) => save('logging', () => updatePerformance({ logging: !e.currentTarget.checked }))}
+          />
+
+          {performanceSettings.logging && (
+            <div>
+              <Text size="sm" fw={500}>Sample rate — {Math.round(rate * 100)}%</Text>
+              <Text size="xs" c="dimmed" mb="xs">
+                The share of browser samples actually recorded. Turn it down on a busy
+                workspace: percentiles stay honest on a fraction of the traffic, and the table
+                stays small. Page opens and web vitals are always kept.
+              </Text>
+              <Slider
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={rate}
+                disabled={!isAdmin || saving === 'sampleRate'}
+                label={(v) => `${Math.round(v * 100)}%`}
+                marks={[
+                  { value: 0.05, label: '5%' },
+                  { value: 0.5, label: '50%' },
+                  { value: 1, label: '100%' },
+                ]}
+                onChange={setRate}
+                onChangeEnd={(v) => save('sampleRate', () => updatePerformance({ sampleRate: v }))}
+                mb="lg"
+              />
+            </div>
+          )}
         </Stack>
       </Paper>
     </Container>

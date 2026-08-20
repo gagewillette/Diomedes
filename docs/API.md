@@ -37,8 +37,21 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 ### Workspace settings
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}}}` — any member |
+| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}, performance: {logging, sampleRate}}}` — any member |
 | PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
+| PATCH | `/api/workspace/settings/performance` | `{performance: {logging?: bool, sampleRate?: 0..1}}`, admin/owner only. `logging: false` stops all sample collection, client and server |
+| GET | `/api/workspace/info` | Workspace inventory: content counts, 7-day activity, per-space breakdown, storage (attachments, disk, database, per-table) and runtime (node, uptime, memory, db pool, search mode). Admin/owner only |
+
+### Performance logging
+Timing samples are recorded by the browser and by the server, stored raw in `perf_samples`, and rolled up on read. Collection stops entirely when `performance.logging` is off. Samples are kept for `PERF_RETENTION_DAYS` (default 14) and pruned daily.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/perf/samples` | `{samples: [{kind, name?, durationMs, serverMs?, transferBytes?, encodedBytes?, decodedBytes?, status?, detail?}]}` — any member (it is their own browser being measured). `kind` ∈ `navigation`, `route`, `interaction`, `longtask`, `api`, `resource`, `vital`; unknown kinds are dropped rather than stored. Max 200 per batch. Answers `{enabled, stored, sampleRate}`; `enabled: false` means logging is off and the batch was discarded |
+| GET | `/api/perf/overview?window=1h\|24h\|7d\|30d` | Computed panel: headline metrics with p50/p75/p95/p99 and budget verdicts, reliability, slowest routes and screens, data transfer, and a bucketed timeline. Admin/owner only |
+| DELETE | `/api/perf/samples?mode=all\|expired` | Clear every sample, or only those past the retention window. Admin/owner only |
+
+Every response carries a `Server-Timing: app;dur=<ms>` header, which the browser reads to split a round trip into server time vs. network time.
 
 ### API tokens (session only for creation)
 | Method | Path | Notes |

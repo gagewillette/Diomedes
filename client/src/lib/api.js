@@ -1,3 +1,5 @@
+import { recordApiTiming, parseServerTiming, noteRequestStart, noteRequestEnd } from './perf.js';
+
 async function request(method, url, body, opts = {}) {
   const init = { method, headers: {} };
   if (body instanceof FormData) {
@@ -6,12 +8,36 @@ async function request(method, url, body, opts = {}) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(url, init);
+  // Timed here rather than at each call site: this is the one place every API
+  // request in the app passes through. The collector ignores it when logging
+  // is off, so an untimed workspace pays only this clock read.
+  const startedAt = performance.now();
+  noteRequestStart();
+  let res;
+  let raw = '';
   let data = null;
   try {
-    data = await res.json();
-  } catch {
-    /* non-json response */
+    res = await fetch(url, init);
+    try {
+      raw = await res.text();
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      /* non-json response */
+    }
+    recordApiTiming({
+      method,
+      url,
+      durationMs: performance.now() - startedAt,
+      status: res.status,
+      serverMs: parseServerTiming(res.headers.get('Server-Timing')),
+      // The decompressed body; the exact wire size is only visible to the
+      // resource observer, which rolls it into the 'fetch' bucket.
+      bytes: raw.length,
+    });
+  } finally {
+    // A network failure still ends the request as far as "is the app still
+    // loading" is concerned, so this has to run on the throwing path too.
+    noteRequestEnd();
   }
   if (!res.ok) {
     if (res.status === 401 && !opts.noRedirect && !location.pathname.startsWith('/login')) {
