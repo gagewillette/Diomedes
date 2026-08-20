@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
+import { pickGreeting, timeBucket } from '../lib/greetings.js';
 
 dayjs.extend(relativeTime);
 
@@ -28,6 +29,21 @@ export default function Home() {
   const [spaces, setSpaces] = useState([]);
   const { user, workspaceName } = useAuth();
   const navigate = useNavigate();
+  const [greeting, setGreeting] = useState(() => pickGreeting(user.name));
+
+  // Re-roll on a fresh visit, and again whenever the clock crosses into a new
+  // part of the day so a long-lived tab never greets you with the wrong one.
+  useEffect(() => {
+    setGreeting(pickGreeting(user.name));
+    let bucket = timeBucket(new Date().getHours());
+    const id = setInterval(() => {
+      const next = timeBucket(new Date().getHours());
+      if (next === bucket) return;
+      bucket = next;
+      setGreeting(pickGreeting(user.name));
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [user.name]);
 
   const load = useCallback(() => {
     api.get('/api/pages/recent').then((d) => setRecent(d.pages)).catch(() => {});
@@ -43,7 +59,7 @@ export default function Home() {
 
   return (
     <Container size="md" py="xl" px="lg" className="gd-fade-in">
-      <Title order={2} mb={4}>👋 Welcome back, {user.name.split(' ')[0]}</Title>
+      <Title order={2} mb={4}>{greeting}</Title>
       <Text c="dimmed" size="sm" mb="xl">{workspaceName}</Text>
 
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} mb="xl">
