@@ -34,6 +34,7 @@ import { makeSuggestionRender } from './suggestionRender.js';
 import MentionList from './MentionList.jsx';
 import BubbleToolbar from './BubbleToolbar.jsx';
 import { useLinkDialog } from './LinkDialog.jsx';
+import { useLinkHoverCard } from './LinkHoverCard.jsx';
 import { LinkClick } from './linkClick.js';
 import { Callout } from './nodes/Callout.jsx';
 import { Toggle } from './nodes/Toggle.jsx';
@@ -424,6 +425,9 @@ export default function Editor({
   }
 
   const { open: openLinkDialog, element: linkDialog } = useLinkDialog(editor);
+  // Readers get the card too: knowing where a link goes before following it
+  // is not an author's privilege.
+  const { element: linkHoverCard } = useLinkHoverCard({ editor, onEdit: openLinkDialog });
 
   const livePointers = dataSavings.livePointers;
   const peers = usePresence({
@@ -472,6 +476,7 @@ export default function Editor({
       {vimEnabled && <VimStatus editor={editor} />}
       {editable && documentPrompt}
       {editable && linkDialog}
+      {linkHoverCard}
     </div>
   );
 }

@@ -24,13 +24,37 @@ export const LinkClick = Extension.create({
   name: 'linkClick',
 
   addProseMirrorPlugins() {
+    // Where the button went down, so a click that travelled can be told from
+    // one that did not. Selecting the words inside a link ends in a click on
+    // that link, and opening a tab out from under someone who was about to
+    // retype the text is the worst possible answer.
+    let pressed = null;
+
     return [
       new Plugin({
         key: new PluginKey('linkClick'),
         props: {
           handleDOMEvents: {
+            mousedown(_view, event) {
+              pressed = { x: event.clientX, y: event.clientY };
+              return false;
+            },
             click(view, event) {
+              const down = pressed;
+              pressed = null;
               if (event.button !== 0) return false;
+
+              // A drag: the pointer travelled between press and release, so
+              // this was a selection.
+              if (down && (Math.abs(down.x - event.clientX) > 3 || Math.abs(down.y - event.clientY) > 3)) {
+                return false;
+              }
+              // Double- and triple-click select a word or a line.
+              if (event.detail > 1) return false;
+              // Anything already selected means the click finished a selection
+              // rather than started a visit. A plain click elsewhere collapses
+              // the selection on mousedown, so this only catches the real case.
+              if (!view.state.selection.empty) return false;
               // Alt to edit; the platform-native "open in new tab" chords are
               // already doing what we do, so let them through untouched.
               if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return false;
@@ -63,17 +87,13 @@ export const LinkClick = Extension.create({
               const href = normalizeUrl(mark.attrs.href);
               if (!href) return false;
 
+              // An in-page `#slug` anchor points at a heading in this very
+              // document, and SectionRef already claims those on mousedown and
+              // scrolls to them. Opening a second copy of the page in another
+              // tab would be a strange way to scroll down.
+              if (href.startsWith('#')) return false;
+
               event.preventDefault();
-
-              // A `#heading` link points inside the page being read. Opening a
-              // second copy of the page in another tab would be a strange way
-              // to scroll down; setting the hash lets SectionRef's own listener
-              // take it from here.
-              if (href.startsWith('#')) {
-                if (globalThis.location) globalThis.location.hash = href;
-                return true;
-              }
-
               window.open(href, '_blank', 'noopener,noreferrer');
               return true;
             },
