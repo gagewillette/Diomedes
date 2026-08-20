@@ -9,7 +9,10 @@ export const hashToken = (token) => crypto.createHash('sha256').update(token).di
 // Resolve the calling user from a Bearer API token or the session cookie.
 // Returns null when unauthenticated; never throws.
 export async function resolveUser(req) {
-  const header = req.get('authorization');
+  // Read the raw header rather than express's req.get: this also runs against
+  // the plain IncomingMessage of a websocket upgrade, which has no express
+  // request methods on it.
+  const header = req.headers?.authorization;
   if (header?.startsWith('Bearer ')) {
     const hash = hashToken(header.slice(7).trim());
     const { rows } = await q(

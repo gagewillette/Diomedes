@@ -22,7 +22,7 @@ import Mathematics from '@tiptap/extension-mathematics';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -39,15 +39,28 @@ import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
 import { PageLink, linkContext } from './nodes/PageLink.jsx';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import { buildCaret, buildSelection } from './collab/carets.js';
+import PointerLayer from './collab/PointerLayer.jsx';
+import { usePresence } from './collab/presence.js';
+import { useContentSnapshot, useSeedContent } from './collab/persistence.js';
 
 const lowlight = createLowlight(common);
 
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
-export function buildExtensions({ uploadFile, placeholder = "Type '/' for commands…" }) {
+export function buildExtensions({ uploadFile, placeholder = "Type '/' for commands…", collab, me }) {
   return [
-    StarterKit.configure({ codeBlock: false, heading: { levels: [1, 2, 3, 4] } }),
+    StarterKit.configure({
+      codeBlock: false,
+      heading: { levels: [1, 2, 3, 4] },
+      // Yjs keeps its own per-user undo stack. Leaving ProseMirror's history
+      // plugin in place would let one person's undo revert someone else's
+      // paragraph, because it only knows about the local document.
+      ...(collab ? { history: false } : {}),
+    }),
     CodeBlockLowlight.configure({ lowlight }),
     Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
     Image.configure({ allowBase64: true }),
@@ -85,11 +98,33 @@ export function buildExtensions({ uploadFile, placeholder = "Type '/' for comman
     SlashCommand.configure({ items: buildSlashItems({ uploadFile }) }),
     PageLink,
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
+    ...(collab
+      ? [
+          Collaboration.configure({ document: collab.ydoc, field: 'default' }),
+          CollaborationCursor.configure({
+            provider: collab.provider,
+            user: me,
+            render: buildCaret,
+            selectionRender: buildSelection,
+          }),
+        ]
+      : []),
   ];
 }
 
-export default function Editor({ content, editable = true, pageId, space, onUpdate, onReady }) {
+export default function Editor({
+  content,
+  editable = true,
+  pageId,
+  space,
+  onUpdate,
+  onReady,
+  collab = null,
+  me = null,
+  onSaveState,
+}) {
   const { preferences } = useAuth();
+  const wrapRef = useRef(null);
   const uploadFile = pageId
     ? async (file) => {
         try {
@@ -110,9 +145,20 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
   linkContext.spaceSlug = space?.slug ?? null;
   linkContext.canWrite = Boolean(editable);
 
+  // The extension list is built once per session: TipTap binds Collaboration to
+  // a specific Y.Doc at creation time, and rebuilding it would drop the binding.
+  const extensions = useMemo(
+    () => buildExtensions({ uploadFile, collab, me }),
+    // ydoc/provider identity, not the session object: the session re-wraps on
+    // every connection-status change and rebuilding the list would be pointless.
+    [collab?.ydoc, collab?.provider, me] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const editor = useEditor({
-    extensions: buildExtensions({ uploadFile }),
-    content,
+    extensions,
+    // With collaboration on, the document comes from the CRDT. Passing initial
+    // content here as well would insert it on top of whatever synced in.
+    content: collab ? undefined : content,
     editable,
     onUpdate: ({ editor: e }) => onUpdate?.(e),
     editorProps: {
@@ -174,10 +220,15 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
     view.dispatch(tr);
   }
 
+  const peers = usePresence({ session: collab, editor, me, wrapRef, canWrite: editable });
+  useSeedContent({ session: collab, editor, pageId, initialContent: content, canWrite: editable });
+  useContentSnapshot({ session: collab, editor, pageId, canWrite: editable, onSaveState });
+
   const smoothCaret = editable && preferences.smoothCaret;
 
   return (
     <div
+      ref={wrapRef}
       className={`gd-editor-wrap ${smoothCaret ? 'gd-caret-hidden' : ''}`}
       style={{
         '--gd-font-family': FONT_STACKS[preferences.fontFamily] || FONT_STACKS.system,
@@ -188,6 +239,7 @@ export default function Editor({ content, editable = true, pageId, space, onUpda
       {editable && <BubbleToolbar editor={editor} />}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
+      {collab && <PointerLayer peers={peers} />}
     </div>
   );
 }

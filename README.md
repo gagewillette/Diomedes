@@ -9,6 +9,13 @@ commands, Word-style smooth caret, tables, task lists, syntax-highlighted code, 
 math, callouts, toggles, YouTube/iframe embeds, image/video/file uploads — and three
 integrated diagram editors: **Mermaid**, **Excalidraw**, and **Draw.io**.
 
+**Live collaboration**: several people edit the same page at once, backed by a Yjs
+CRDT over a websocket. You see a colleague's **text caret** while they type and their
+**mouse pointer**, Miro-style, while they read or select — with a colour derived from
+their user id, so the same person is the same colour for everyone. See
+[docs/realtime-collaboration.md](docs/realtime-collaboration.md) for the design and
+the concurrency reasoning behind it.
+
 **Organization**: spaces with nested page trees, full-text search (optionally
 **semantic** — see below), favorites, page
 history with restore, threaded comments, trash, public share links, Markdown

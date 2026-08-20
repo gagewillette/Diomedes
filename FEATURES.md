@@ -38,7 +38,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 
 | Docmost capability | Diomedes |
 |---|---|
-| Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ➖ v1 uses autosave (800 ms debounce), last-write-wins + full version history for recovery. Real-time CRDT sync is the one large omission |
+| Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ✅ Yjs CRDT over a websocket at `/api/collab/<pageId>`, persisted to postgres and mirrored between app processes over Redis. Live carets while typing, Miro-style mouse pointers while reading, colours derived from the user id — see [docs/realtime-collaboration.md](docs/realtime-collaboration.md) |
 | Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |

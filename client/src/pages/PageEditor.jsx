@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Container, Group, Text, ActionIcon, Menu, Tooltip, Breadcrumbs, Anchor, TextInput,
   Popover, Button, Switch, Stack, Loader, Center, CopyButton,
@@ -17,6 +17,10 @@ import { downloadFile } from '../lib/markdown.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import HistoryModal from '../components/HistoryModal.jsx';
+import PresenceBar from '../components/PresenceBar.jsx';
+import { useCollabSession } from '../editor/collab/session.js';
+import { usePeers } from '../editor/collab/presence.js';
+import { pickUserColor } from '../lib/userColor.js';
 import BacklinksPanel from '../components/BacklinksPanel.jsx';
 import PagePicker from '../components/PagePicker.jsx';
 
@@ -69,6 +73,21 @@ export default function PageEditor() {
 
   const canWrite = data && ['admin', 'writer'].includes(data.myRole);
 
+  // Live collaboration session for this page. Readers join too — presence is
+  // useful even when you cannot type, and the server refuses their edits.
+  const collab = useCollabSession({ pageId, enabled: Boolean(data), resetKey: reloadKey });
+  const peers = usePeers(collab);
+
+  // Memoised: the identity object is part of the editor's extension config, so
+  // a fresh object every render would tear the editor down mid-keystroke.
+  const me = useMemo(
+    () =>
+      user
+        ? { id: user.id, name: user.name || user.username, color: pickUserColor(user.id) }
+        : null,
+    [user]
+  );
+
   const saveContent = useCallback(async (editor) => {
     if (!editor) return;
     setSaveState('saving');
@@ -81,11 +100,16 @@ export default function PageEditor() {
     }
   }, [pageId]);
 
+  // Without a collab session (never, for a normal page load — but the component
+  // has to survive one render before `data` arrives) fall back to debounced
+  // whole-document saves. With one, Editor's snapshot writer owns saving and
+  // reports its state back through onSaveState.
   const onEditorUpdate = useCallback((editor) => {
+    if (collab) return;
     setSaveState('saving');
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => saveContent(editor), 800);
-  }, [saveContent]);
+  }, [saveContent, collab]);
 
   const onTitleChange = (value) => {
     setTitle(value);
@@ -195,6 +219,7 @@ export default function PageEditor() {
           <Text size="sm">{title || 'Untitled'}</Text>
         </Breadcrumbs>
         <Group gap={4} wrap="nowrap">
+          <PresenceBar peers={peers} status={collab?.status} />
           <Text size="xs" c={saveState === 'error' ? 'red' : 'dimmed'} mr={4} className="gd-savestate">
             {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved'}
           </Text>
@@ -316,6 +341,9 @@ export default function PageEditor() {
           content={data.page.content}
           editable={Boolean(canWrite)}
           pageId={pageId}
+          collab={collab}
+          me={me}
+          onSaveState={setSaveState}
           space={data.space}
           onUpdate={onEditorUpdate}
           onReady={(editor) => { editorRef.current = editor; }}
