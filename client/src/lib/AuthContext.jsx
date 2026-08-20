@@ -3,7 +3,7 @@ import { notifications } from '@mantine/notifications';
 import { api } from './api.js';
 import { startRealtime } from './realtime.js';
 import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
-import { mergeWorkspace, DEFAULT_WORKSPACE } from './workspace.js';
+import { mergeWorkspace, DEFAULT_WORKSPACE, CODE_INTELLIGENCE_READONLY } from './workspace.js';
 import { startPerfCollector, stopPerfCollector } from './perf.js';
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -152,6 +152,17 @@ export function AuthProvider({ children }) {
     return data.workspace;
   }, []);
 
+  // Admin-only, same pattern as the two above. Editors already open pick the
+  // change up over SSE, which is what makes the switch take effect without a
+  // reload in every other browser too.
+  const updateCodeIntelligence = useCallback(async (partial) => {
+    const data = await api.patch('/api/workspace/settings/code-intelligence', {
+      codeIntelligence: partial,
+    });
+    setState((s) => ({ ...s, workspace: mergeWorkspace(data.workspace) }));
+    return data.workspace;
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -165,6 +176,8 @@ export function AuthProvider({ children }) {
         updateDataSavings,
         performanceSettings: state.workspace.performance,
         updatePerformance,
+        codeIntelligence: state.workspace.codeIntelligence,
+        updateCodeIntelligence,
         updateWorkspaceName,
       }}
     >
@@ -181,4 +194,7 @@ export const useAuth = () =>
     workspace: DEFAULT_WORKSPACE,
     dataSavings: DEFAULT_WORKSPACE.dataSavings,
     performanceSettings: DEFAULT_WORKSPACE.performance,
+    // Outside a provider means a public share page: colour the code, check
+    // nothing.
+    codeIntelligence: CODE_INTELLIGENCE_READONLY,
   };

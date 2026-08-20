@@ -1,4 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react';
+import { Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Document from '@tiptap/extension-document';
 import Link from '@tiptap/extension-link';
@@ -20,8 +21,6 @@ import Color from '@tiptap/extension-color';
 import Youtube from '@tiptap/extension-youtube';
 import Mention from '@tiptap/extension-mention';
 import Mathematics from '@tiptap/extension-mathematics';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { common, createLowlight } from 'lowlight';
 import { Markdown } from 'tiptap-markdown';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
@@ -40,6 +39,8 @@ import { MermaidDiagram } from './nodes/Mermaid.jsx';
 import { ExcalidrawBlock } from './nodes/ExcalidrawNode.jsx';
 import { IframeEmbed, VideoBlock } from './nodes/Embeds.jsx';
 import { DrawioBlock } from './nodes/Drawio.jsx';
+import { CodeBlock } from './nodes/CodeBlock.jsx';
+import { CodeLintPlugin, setLintSettings } from './code/lintPlugin.js';
 import { FindInPage } from './FindInPage.js';
 import { BlockId } from './blockId.js';
 import { TrailingNode } from './trailingNode.js';
@@ -61,8 +62,6 @@ import { usePresence } from './collab/presence.js';
 import { ReadOnlySelection } from './collab/readonlySelection.js';
 import { useContentSnapshot, useSeedContent } from './collab/persistence.js';
 
-const lowlight = createLowlight(common);
-
 // The one schema change footnotes need, and the reason they need no policing.
 // `footnotes?` after `block+`, with the container deliberately left out of the
 // `block` group, is what makes the apparatus a singleton that can only exist as
@@ -79,7 +78,12 @@ let userCache = [];
 // corner, which is the FOOTNOTES heading, not the line being typed on.
 const NO_PLACEHOLDER = new Set([FOOTNOTES, FOOTNOTE]);
 
-export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false }) {
+// Code intelligence as the extensions see it. Held in a ref-like module object
+// rather than baked into the extension list, because the list is built once per
+// session and the workspace switch has to take effect without a reload.
+const codeSettings = { highlighting: true, linting: false, maxBytes: 100_000 };
+
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false, codeIntelligence = codeSettings }) {
   return [
     // First in the list, and at a higher priority than everything else: in
     // normal mode the keys must not reach the ordinary editing keymap.
@@ -96,7 +100,10 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
       // paragraph, because it only knows about the local document.
       ...(collab ? { history: false } : {}),
     }),
-    CodeBlockLowlight.configure({ lowlight }),
+    // The code block owns its own lowlight instance (lazily populated, see
+    // ./code/languages.js) and its own NodeView. `codeIntelligence` is the
+    // same object the lint plugin reads, so a workspace toggle reaches both.
+    CodeBlock.configure({ codeIntelligence }),
     Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
     Image.configure({ allowBase64: true }),
     Table.configure({ resizable: true }),
@@ -141,6 +148,13 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     Callout, Toggle, MermaidDiagram, ExcalidrawBlock, DrawioBlock, IframeEmbed, VideoBlock,
     ...FootnoteExtensions,
     FindInPage,
+    // Per-language diagnostics, as ProseMirror decorations and nothing else —
+    // see the module comment in ./code/lintPlugin.js for why that matters with
+    // Collaboration switched on.
+    Extension.create({
+      name: 'codeLint',
+      addProseMirrorPlugins: () => [CodeLintPlugin({ getSettings: () => ({ ...codeIntelligence }) })],
+    }),
     // Heading anchors plus the §-reference overlay. Pure decoration, so it runs
     // for readers and the public share view exactly as it does for an author.
     SectionRef,
@@ -206,7 +220,7 @@ export default function Editor({
   me = null,
   onSaveState,
 }) {
-  const { preferences, dataSavings } = useAuth();
+  const { preferences, dataSavings, codeIntelligence } = useAuth();
   const wrapRef = useRef(null);
   // Modal editing is for people writing the page; a reader gets the plain view.
   const vimEnabled = editable && preferences.keymap === 'vim';
@@ -218,6 +232,13 @@ export default function Editor({
   // built before uploads were switched off.
   const uploadsAllowedRef = useRef(uploadsAllowed);
   uploadsAllowedRef.current = uploadsAllowed;
+
+  // The workspace flag is a *ceiling*: a user can turn checking further down on
+  // their own machine, never back on once an admin has switched it off. And a
+  // reader never gets diagnostics — a squiggle on a page you cannot edit is a
+  // complaint with no remedy.
+  const lintEnabled =
+    editable && codeIntelligence.linting && preferences.codeLinting !== 'off';
 
   const uploadFile = pageId
     ? async (file) => {
@@ -257,6 +278,13 @@ export default function Editor({
   linkContext.spaceId = space?.id ?? null;
   linkContext.spaceSlug = space?.slug ?? null;
   linkContext.canWrite = Boolean(editable);
+
+  // Mutated rather than replaced, because `buildExtensions` closes over this
+  // exact object: the extension list is built once per session, so the toggle
+  // has to reach the plugin and the NodeView through a shared reference.
+  codeSettings.highlighting = codeIntelligence.highlighting;
+  codeSettings.linting = lintEnabled;
+  codeSettings.maxBytes = codeIntelligence.maxBytes;
 
   // The extension list is built once per session: TipTap binds Collaboration to
   // a specific Y.Doc at creation time, and rebuilding it would drop the binding.
@@ -307,6 +335,18 @@ export default function Editor({
   useEffect(() => {
     if (editor && editor.isEditable !== editable) editor.setEditable(editable);
   }, [editable, editor]);
+
+  // `workspace-settings-changed` already fans out over SSE and lands in
+  // AuthContext, so this effect is the last hop: turning checking off clears
+  // every diagnostic in an editor that is already open, with no reload.
+  useEffect(() => {
+    if (!editor) return;
+    setLintSettings(editor, {
+      linting: lintEnabled,
+      maxBytes: codeIntelligence.maxBytes,
+      highlighting: codeIntelligence.highlighting,
+    });
+  }, [editor, lintEnabled, codeIntelligence.maxBytes, codeIntelligence.highlighting]);
 
   useEffect(() => {
     api.get('/api/users', { noRedirect: true }).then((d) => { userCache = d.users; }).catch(() => {});

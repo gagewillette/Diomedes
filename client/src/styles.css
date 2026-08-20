@@ -172,6 +172,148 @@ body.gd-block-drag-active {
   border: 1px solid var(--mantine-color-gray-3);
 }
 .gd-editor pre code { background: none; padding: 0; font-size: inherit; }
+
+/* ------------------------------------------------------------------ code
+   Syntax tokens.
+
+   Deliberately *not* a stock highlight.js theme stylesheet. Every one of those
+   hardcodes its own `pre` background and a single palette, so it would fight
+   the light/dark rules directly above and would have to be swapped at runtime
+   on a colour-scheme change. Defining the palette as CSS variables instead
+   means one set of token rules serves both schemes and the flip is free.
+
+   Values are picked off the Mantine scale so they sit on the two `pre`
+   backgrounds above (--mantine-color-dark-8 and #f6f8fa) at WCAG AA or better:
+   the 3/4 shades are light-on-dark, the 8/9 shades dark-on-light. */
+.gd-editor pre code {
+  --hl-keyword: var(--mantine-color-violet-4);
+  --hl-string: var(--mantine-color-teal-4);
+  --hl-number: var(--mantine-color-orange-4);
+  --hl-comment: var(--mantine-color-dark-1);
+  --hl-func: var(--mantine-color-blue-4);
+  --hl-type: var(--mantine-color-cyan-4);
+  --hl-attr: var(--mantine-color-grape-4);
+  --hl-meta: var(--mantine-color-gray-5);
+  --hl-deleted: var(--mantine-color-red-4);
+  --hl-added: var(--mantine-color-green-4);
+}
+[data-mantine-color-scheme='light'] .gd-editor pre code {
+  --hl-keyword: var(--mantine-color-violet-8);
+  --hl-string: var(--mantine-color-teal-9);
+  --hl-number: var(--mantine-color-orange-9);
+  --hl-comment: var(--mantine-color-gray-7);
+  --hl-func: var(--mantine-color-blue-8);
+  --hl-type: var(--mantine-color-cyan-9);
+  --hl-attr: var(--mantine-color-grape-8);
+  --hl-meta: var(--mantine-color-gray-7);
+  --hl-deleted: var(--mantine-color-red-9);
+  --hl-added: var(--mantine-color-green-9);
+}
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-selector-tag,
+.hljs-section,
+.hljs-name { color: var(--hl-keyword); }
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-symbol,
+.hljs-template-tag,
+.hljs-template-variable { color: var(--hl-string); }
+.hljs-number,
+.hljs-bullet,
+.hljs-link { color: var(--hl-number); }
+.hljs-comment,
+.hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.function_.invoke__ { color: var(--hl-func); }
+.hljs-type,
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-selector-class,
+.hljs-params { color: var(--hl-type); }
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-operator { color: var(--hl-attr); }
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-doctag,
+.hljs-punctuation,
+.hljs-tag,
+.hljs-subst { color: var(--hl-meta); }
+.hljs-deletion { color: var(--hl-deleted); }
+.hljs-addition { color: var(--hl-added); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* The block, its chrome and its gutter.
+
+   The header is a sibling of <pre>, not a child, so hovering it never puts the
+   caret anywhere and its buttons cannot be typed over. */
+.gd-code-block { position: relative; }
+.gd-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px 2px;
+  /* Chrome fades in on hover or while the block has focus — an unhovered page
+     of code should read as code, not as a row of toolbars. */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.gd-code-block:hover .gd-code-header,
+.gd-code-block:focus-within .gd-code-header { opacity: 1; }
+/* A reader has no picker and no need for the row to reserve space, but the
+   copy button still earns its place. */
+.gd-code-block.is-readonly .gd-code-header { min-height: 0; }
+.gd-code-lang input { font-size: 12px; }
+.gd-editor .gd-code-block pre { margin: 0; display: flex; gap: 12px; }
+.gd-code-gutter {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  text-align: right;
+  user-select: none;
+  color: var(--mantine-color-dimmed);
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--mantine-color-default-border);
+  padding-right: 10px;
+}
+.gd-code-block code { flex: 1 1 auto; overflow-x: auto; }
+/* Soft wrap is per-device (localStorage, keyed on blockId) — never a document
+   attribute, or one person's narrow laptop would rewrap it for everyone. */
+.gd-code-block.is-wrapped code { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Highlighting switched off mid-session: grammars registered before the switch
+   keep emitting spans, so the colours are neutralised here rather than left to
+   take effect on the next reload. A fresh load with the switch off registers no
+   grammar at all and produces no spans in the first place. */
+.gd-code-block.is-plain code [class^='hljs-'],
+.gd-code-block.is-plain code [class*=' hljs-'] {
+  color: inherit;
+  font-style: normal;
+  font-weight: inherit;
+}
+
+/* Diagnostics. Decorations only: these classes are applied by
+   editor/code/lintPlugin.js and exist in one browser's view — never in the
+   document, never in Yjs, never in page history. */
+.gd-lint {
+  text-decoration: underline wavy;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+.gd-lint-error { text-decoration-color: var(--mantine-color-red-5); }
+.gd-lint-warn,
+.gd-lint-warning { text-decoration-color: var(--mantine-color-yellow-5); }
 .gd-editor blockquote {
   border-left: 3px solid var(--mantine-color-gray-4);
   margin-left: 0;

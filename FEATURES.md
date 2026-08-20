@@ -14,7 +14,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Slash command menu (`/`) | ✅ Text, H1–H3, lists, to-do, quote, code, divider, table, image, video, file, callout, toggle, footnote, math, Mermaid, Excalidraw, Draw.io, YouTube, iframe embed |
 | Floating format toolbar on selection | ✅ Bold/italic/underline/strike/code/link/highlight/color/alignment, block type |
 | Tables (resize, row/col ops, header) | ✅ TipTap tables with column resizing and row/col menu |
-| Code blocks with syntax highlighting | ✅ highlight.js via lowlight, language picker |
+| Code blocks with syntax highlighting | ✅ highlight.js via lowlight (grammars loaded per language, on demand), searchable language picker, copy, soft wrap, line numbers, and opt-in per-language checking (JSON, YAML, SQL, Python, JavaScript) behind a workspace toggle |
 | Task lists / to-do | ✅ |
 | Callouts (info/warning/danger/success) | ✅ Custom node |
 | Toggle blocks | ✅ Custom collapsible node |
