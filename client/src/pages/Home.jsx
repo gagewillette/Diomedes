@@ -8,6 +8,7 @@ import { api, onAppEvent } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { pickGreeting, timeBucket } from '../lib/greetings.js';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
+import Emoji from '../components/Emoji.jsx';
 
 dayjs.extend(relativeTime);
 
@@ -70,7 +71,7 @@ export default function Home() {
         {spaces.map((s) => (
           <Card key={s.id} withBorder component={Link} to={`/s/${s.slug}`} className="gd-space-card">
             <Group gap={8}>
-              <span style={{ fontSize: 22 }}>{s.icon}</span>
+              <Emoji char={s.icon} size={22} />
               <div>
                 <Text fw={700} size="sm">{s.name}</Text>
                 <Text size="xs" c="dimmed">{s.page_count} page{s.page_count === 1 ? '' : 's'}</Text>

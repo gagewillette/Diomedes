@@ -6,6 +6,7 @@ import { api } from '../lib/api.js';
 import Editor from '../editor/Editor.jsx';
 import FindBar from '../components/FindBar.jsx';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
+import Emoji from '../components/Emoji.jsx';
 
 export default function SharePage() {
   const { token } = useParams();
@@ -53,7 +54,7 @@ export default function SharePage() {
   return (
     <Container size="md" py="xl" px="lg">
       <Group gap={8} align="flex-start" wrap="nowrap">
-        {data.page.icon && <Text style={{ fontSize: 38, lineHeight: 1.2 }}>{data.page.icon}</Text>}
+        {data.page.icon && <Emoji char={data.page.icon} size={40} />}
         <Title order={1} style={{ fontSize: 34 }}>{data.page.title || 'Untitled'}</Title>
       </Group>
       <Text size="xs" c="dimmed" mt={4} mb="md">

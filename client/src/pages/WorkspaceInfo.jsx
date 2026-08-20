@@ -16,6 +16,7 @@ import { markPageReady } from '../lib/perf.js';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
 import { formatBytes, formatMs, formatCount, formatDuration, formatDate } from '../lib/format.js';
 import Sparkline from '../components/Sparkline.jsx';
+import Emoji from '../components/Emoji.jsx';
 
 const WINDOW_LABELS = { '1h': 'Last hour', '24h': 'Last 24h', '7d': 'Last 7 days', '30d': 'Last 30 days' };
 
@@ -478,7 +479,7 @@ export default function WorkspaceInfo() {
                 rows={spaces}
                 valueKey="pages"
                 columns={[
-                  { key: 'name', label: 'Space', render: (s) => <Text size="sm">{s.icon} {s.name}</Text> },
+                  { key: 'name', label: 'Space', render: (s) => <Text size="sm"><Emoji char={s.icon} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{s.name}</Text> },
                   { key: 'pages', label: 'Pages', align: 'right', render: (s) => formatCount(s.pages) },
                   { key: 'members', label: 'Members', align: 'right', render: (s) => formatCount(s.members) },
                   { key: 'bytes', label: 'Files', align: 'right', render: (s) => formatBytes(s.bytes) },

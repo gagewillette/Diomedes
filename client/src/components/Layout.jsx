@@ -17,6 +17,7 @@ import { startRoute, settleRoute } from '../lib/perf.js';
 import { focusEditor, focusFileTree } from '../lib/vimFocus.js';
 import PageTree from './PageTree.jsx';
 import SearchModal from './SearchModal.jsx';
+import Emoji from './Emoji.jsx';
 
 const NAV_WIDTH_KEY = 'gd-nav-width';
 const NAV_WIDTH_DEFAULT = 280;
@@ -234,7 +235,7 @@ export default function Layout({ children }) {
                   </ActionIcon>
                   <UnstyledButton className="gd-tree-label" component={Link} to={`/s/${space.slug}`} title={space.name}>
                     <Group gap={6} wrap="nowrap">
-                      <span className="gd-tree-icon">{space.icon}</span>
+                      <span className="gd-tree-icon"><Emoji char={space.icon} size={15} /></span>
                       <Text size="sm" fw={600} truncate>{space.name}</Text>
                     </Group>
                   </UnstyledButton>

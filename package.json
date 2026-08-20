@@ -1,6 +1,6 @@
 {
   "name": "diomedes",
-  "version": "2.0.10",
+  "version": "2.0.12",
   "private": true,
   "scripts": {
     "dev": "bash scripts/dev.sh",
@@ -8,6 +8,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "emoji-datasource-apple": "^16.0.0",
+    "sharp": "^0.35.3",
     "wait-on": "^8.0.1"
   }
 }
