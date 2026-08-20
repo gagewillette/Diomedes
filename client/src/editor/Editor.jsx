@@ -47,6 +47,7 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { buildCaret, buildSelection } from './collab/carets.js';
 import PointerLayer from './collab/PointerLayer.jsx';
 import { usePresence } from './collab/presence.js';
+import { ReadOnlySelection } from './collab/readonlySelection.js';
 import { useContentSnapshot, useSeedContent } from './collab/persistence.js';
 
 const lowlight = createLowlight(common);
@@ -110,6 +111,8 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
             render: buildCaret,
             selectionRender: buildSelection,
           }),
+          // Readers get their highlights broadcast too — see the module comment.
+          ReadOnlySelection.configure({ provider: collab.provider }),
         ]
       : []),
     DocumentBlock,
