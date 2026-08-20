@@ -87,17 +87,13 @@ export const LinkClick = Extension.create({
               const href = normalizeUrl(mark.attrs.href);
               if (!href) return false;
 
+              // An in-page `#slug` anchor points at a heading in this very
+              // document, and SectionRef already claims those on mousedown and
+              // scrolls to them. Opening a second copy of the page in another
+              // tab would be a strange way to scroll down.
+              if (href.startsWith('#')) return false;
+
               event.preventDefault();
-
-              // A `#heading` link points inside the page being read. Opening a
-              // second copy of the page in another tab would be a strange way
-              // to scroll down; setting the hash lets SectionRef's own listener
-              // take it from here.
-              if (href.startsWith('#')) {
-                if (globalThis.location) globalThis.location.hash = href;
-                return true;
-              }
-
               window.open(href, '_blank', 'noopener,noreferrer');
               return true;
             },

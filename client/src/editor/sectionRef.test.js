@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Schema } from '@tiptap/pm/model';
-import { buildDecorations, headingForHash, SECTION_REF_ATTR } from './SectionRef.js';
+import { anchorTarget, buildDecorations, headingForHash, SECTION_REF_ATTR } from './SectionRef.js';
 
 // A minimal doc/heading/paragraph/code schema. Building it here rather than
 // booting a TipTap editor keeps the test free of a DOM while still running the
@@ -114,6 +114,31 @@ test('a hash resolves by slug, by number, and by the §-prefixed form', () => {
   assert.equal(headingForHash(index, '#%C2%A73.2').title, 'Local-first read cache');
   assert.equal(headingForHash(index, '#nothing-here'), null);
   assert.equal(headingForHash(index, ''), null);
+});
+
+test('an in-page markdown link resolves to the heading it names', () => {
+  const { index } = buildDecorations(doc(h(2, 'Changing models or dimensions'), p('body')));
+  assert.equal(
+    anchorTarget(index, '#changing-models-or-dimensions').title,
+    'Changing models or dimensions',
+  );
+});
+
+test('an anchor that names no heading is left to the browser', () => {
+  const { index } = buildDecorations(SAMPLE());
+  assert.equal(anchorTarget(index, '#no-such-section'), null);
+});
+
+test('only same-page hrefs are treated as section anchors', () => {
+  const { index } = buildDecorations(SAMPLE());
+  for (const href of ['/s/ops/p/abc#3.2', 'https://example.com/#3.2', '3.2', '', null]) {
+    assert.equal(anchorTarget(index, href), null, `${href} is not an in-page anchor`);
+  }
+});
+
+test('an anchor resolves by section number as well as by slug', () => {
+  const { index } = buildDecorations(SAMPLE());
+  assert.equal(anchorTarget(index, '#3.2').title, 'Local-first read cache');
 });
 
 test('renumbering a heading re-resolves the references pointing at it', () => {
