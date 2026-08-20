@@ -1,59 +1,180 @@
-# Diomedes
+<div align="center">
 
-A self-hosted wiki & note-taking app in the spirit of Docmost/Notion, built from
-scratch. React + Mantine + TipTap frontend, Express + PostgreSQL + Redis backend,
-shipped as a single versioned Docker image.
+<img src="docs/assets/banner.svg" alt="Diomedes — a self-hosted wiki that thinks in blocks" width="100%">
 
-**Editor**: markdown paste with auto-formatting, markdown typing shortcuts, slash
-commands, drag-handle block reordering, Word-style smooth caret, tables, task
-lists, syntax-highlighted code, KaTeX math, callouts, toggles, footnotes, YouTube/iframe embeds, image/video/file uploads,
-**PDF and PowerPoint documents** — and three integrated diagram editors:
-**Mermaid**, **Excalidraw**, and **Draw.io**.
+<br>
 
-**Live collaboration**: several people edit the same page at once, backed by a Yjs
-CRDT over a websocket. You see a colleague's **text caret** while they type and their
-**mouse pointer**, Miro-style, while they read or select — with a colour derived from
-their user id, so the same person is the same colour for everyone. See
-[docs/realtime-collaboration.md](docs/realtime-collaboration.md) for the design and
-the concurrency reasoning behind it.
+**A self-hosted wiki & note-taking app in the spirit of Docmost and Notion — built from scratch.**
 
-**Block storage**: every block in a document carries a stable id, and a projection
-of those blocks is derived from the page inside the same transaction that stores
-it. A save that changes one paragraph re-embeds one chunk instead of the whole
-page, and `GET /api/pages/:id/delta?since=` answers "what changed" without
-shipping the document. See [docs/block-storage.md](docs/block-storage.md).
+React · Mantine · TipTap on the front. Express · PostgreSQL · Redis on the back.
+Shipped as one versioned Docker image.
 
-**Organization**: spaces with nested page trees, full-text search (optionally
-**semantic** — see below), favorites, page
-history with restore, threaded comments, trash, public share links, Markdown
-import/export, dark mode.
+<br>
 
-**Access control**: username/password auth (bcrypt + Redis sessions), workspace roles
-(owner/admin/member) and per-space roles (full access / can edit / can view), admin
-user management. Per-user editor preferences (font, size, spacing, width, animations).
+[![CI](https://github.com/gagewillette/Diomedes/actions/workflows/ci.yml/badge.svg)](https://github.com/gagewillette/Diomedes/actions/workflows/ci.yml) [![Build and publish image](https://github.com/gagewillette/Diomedes/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/gagewillette/Diomedes/actions/workflows/docker-publish.yml) ![Release](https://img.shields.io/badge/release-2.1.0-7dd3fc?style=flat-square) ![Image](https://img.shields.io/badge/ghcr.io-gagewillette%2Fdiomedes-a78bfa?style=flat-square&logo=docker&logoColor=white)
 
-**API**: every endpoint accepts a session cookie *or* a personal API token
-(`Authorization: Bearer dio_…`, created in Settings) — built to hang an MCP server
-off of. See [docs/API.md](docs/API.md). Full feature mapping against Docmost lives
-in [FEATURES.md](FEATURES.md). Diagrams travel over that API as text: a
-```` ```mermaid ```` fence for Mermaid, a ```` ```drawio ```` fence of mxGraph XML
-for Draw.io. Both are drawn in the page exactly as if they had been made here.
+![React](https://img.shields.io/badge/React-0b1020?style=flat-square&logo=react&logoColor=61dafb) ![Mantine](https://img.shields.io/badge/Mantine-0b1020?style=flat-square&logo=mantine&logoColor=7dd3fc) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-0b1020?style=flat-square&logo=postgresql&logoColor=7dd3fc) ![Redis](https://img.shields.io/badge/Redis-0b1020?style=flat-square&logo=redis&logoColor=f0abfc) ![Docker](https://img.shields.io/badge/Docker-0b1020?style=flat-square&logo=docker&logoColor=a78bfa)
 
-## Layout
+<br>
 
-```
-diomedes/
-├── client/            # React SPA (Vite, Mantine UI, TipTap editor)
-├── server/            # Express API (ESM, no build step)
-├── scripts/           # bump-version.sh (versioning), release.sh (manual release)
-├── Dockerfile         # multi-stage: build client → install server deps → runtime
-└── docker-compose.example.yml  # diomedes + postgres + redis + watchtower
-```
+[**Quick start**](#-quick-start) · [Features](#-what-it-does) · [See it work](#-see-it-work) · [Architecture](#-under-the-hood) · [Semantic search](#-semantic-search-optional) · [API](docs/API.md)
 
-Your real `docker-compose.yml` is gitignored — it holds host-specific mount paths
-and belongs on the server, not in this repo.
+</div>
 
-## Running
+<br>
+
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)"  srcset="docs/assets/hero-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/hero-light.jpg">
+  <img src="docs/assets/hero-dark.jpg" alt="A Diomedes page: nested spaces in the sidebar, a callout, and a Mermaid diagram rendered inline" width="100%">
+</picture>
+<sub><i>Light and dark. The screenshot above follows your GitHub theme — so does the app.</i></sub>
+</div>
+
+---
+
+## ✨ What it does
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### ✍️ An editor that gets out of the way
+
+Paste markdown and it formats itself. Type markdown and it formats as you go.
+Slash commands, drag-handle block reordering, a Word-style smooth caret,
+tables, task lists, syntax-highlighted code, KaTeX math, callouts, toggles,
+footnotes, and YouTube/iframe embeds.
+
+</td>
+<td width="50%" valign="top">
+
+### 📐 Three diagram editors, inline
+
+**Mermaid**, **Excalidraw** and **Draw.io** — each rendered in the page and
+editable in place. Diagrams travel over the API as plain text — a `mermaid`
+fence, or a `drawio` fence of mxGraph XML — and draw exactly as if they'd been
+made by hand.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 👥 Real-time collaboration
+
+Several people edit one page at once over a Yjs CRDT on a websocket. You see a
+colleague's **text caret** while they type and their **mouse pointer**,
+Miro-style, while they read — coloured from their user id, so the same person is
+the same colour for everyone.
+
+→ [docs/realtime-collaboration.md](docs/realtime-collaboration.md)
+
+</td>
+<td width="50%" valign="top">
+
+### 🧱 Block storage
+
+Every block carries a stable id, and a projection of those blocks is derived
+inside the same transaction that stores the page. Change one paragraph and one
+chunk is re-embedded, not the whole page.
+
+→ [docs/block-storage.md](docs/block-storage.md)
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🗂 Organisation that scales
+
+Spaces with nested page trees, full-text search (optionally **semantic**),
+favorites, page history with restore, threaded comments, trash, public share
+links, Markdown import/export, dark mode.
+
+</td>
+<td width="50%" valign="top">
+
+### 🔐 Access control
+
+Username/password auth (bcrypt + Redis sessions), workspace roles
+(owner/admin/member), per-space roles (full access / can edit / can view),
+admin user management, and per-user editor preferences.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 📎 Documents, not just notes
+
+Drop a **PDF** or **PowerPoint** into a page and it lands where you dropped it.
+PPTX can be converted to PDF on upload (LibreOffice, bundled in the image) or
+kept as-is.
+
+</td>
+<td width="50%" valign="top">
+
+### 🤖 An API built for robots
+
+Every endpoint takes a session cookie *or* a personal API token
+(`Authorization: Bearer dio_…`) — built to hang an MCP server off of.
+
+→ [docs/API.md](docs/API.md) · [FEATURES.md](FEATURES.md)
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🎬 See it work
+
+<div align="center">
+
+**Markdown shortcuts and slash commands**
+
+<img src="docs/assets/editor.gif" alt="Typing markdown that formats itself, then a slash command inserting a callout" width="90%">
+
+<sub><code>##</code> becomes a heading, <code>**bold**</code> becomes bold, <code>`code`</code> becomes code — then <code>/</code> opens the command menu.</sub>
+
+<br><br>
+
+**Diagrams, rendered in the page**
+
+<img src="docs/assets/diagrams.gif" alt="Inserting a Mermaid diagram from the slash menu and editing its source, with the picture re-rendering live" width="90%">
+
+<sub>Insert from the slash menu, edit the source in place, and the picture redraws as you save.</sub>
+
+</div>
+
+<table>
+<tr>
+<td width="50%" valign="top" align="center">
+<img src="docs/assets/search.jpg" alt="Command palette search showing matched pages with highlighted hits" width="100%">
+<br><sub><b>⌘K</b> — search every page, with hits highlighted in context</sub>
+</td>
+<td width="50%" valign="top" align="center">
+<img src="docs/assets/slash-menu.jpg" alt="The slash command menu open in the editor" width="100%">
+<br><sub><b>/</b> — every block type, one keystroke away</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top" align="center">
+<img src="docs/assets/blocks.jpg" alt="A page showing a code block, a warning callout and a task list" width="100%">
+<br><sub>Code, callouts and task lists</sub>
+</td>
+<td width="50%" valign="top" align="center">
+<img src="docs/assets/comments.jpg" alt="The comments panel with a threaded discussion" width="100%">
+<br><sub>Threaded comments, resolvable</sub>
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Quick start
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml   # adjust volumes to taste
@@ -61,10 +182,14 @@ cp .env.example .env                               # fill in APP_SECRET + POSTGR
 docker compose up -d
 ```
 
-The image is pulled from `ghcr.io/gagewillette/diomedes` — no local build needed.
+The image is pulled from `ghcr.io/gagewillette/diomedes` — **no local build needed**.
 
-The app listens on **port 3000**. First visit shows a one-time setup screen that
-creates the owner account and workspace.
+Diomedes listens on **port 3000**. The first visit shows a one-time setup screen
+that creates the owner account and workspace.
+
+> [!NOTE]
+> Your real `docker-compose.yml` is gitignored — it holds host-specific mount
+> paths and belongs on the server, not in this repo.
 
 The example file uses named volumes; switch them to bind mounts if you want the
 data at fixed paths (this is what the author's server does):
@@ -75,7 +200,61 @@ data at fixed paths (this is what the author's server does):
 | `/mnt/storage/diomedes/redis` | Redis persistence (sessions survive restarts) |
 | `/mnt/storage/diomedes/app-data` | Uploaded files/attachments (documents under `users/<user-id>/`) |
 
-## Documents (PDF / PowerPoint)
+<details>
+<summary><b>Running it locally for development</b></summary>
+
+<br>
+
+```bash
+npm run dev        # starts Postgres + Redis in Docker, then the server and Vite
+npm run dev:down   # tears the containers back down
+```
+
+`scripts/dev.sh` bind-mounts the databases under `./data`, so state survives a
+restart. Setting `SEMANTIC_SEARCH_ENABLED=true` in `.env` is the whole switch for
+hybrid search locally — it starts the same containerised Ollama and blocks on the
+first model download.
+
+</details>
+
+---
+
+## 🏗 Under the hood
+
+```mermaid
+graph LR
+  B[Browser · React + TipTap] -->|REST| API[Express API]
+  B -.->|websocket · Yjs| COLLAB[Collab server]
+  API --> PG[(PostgreSQL)]
+  API --> RD[(Redis · sessions)]
+  API --> PROJ[Block projector]
+  PROJ --> PG
+  PROJ --> Q[Embedding worker]
+  Q --> VEC[(pgvector)]
+  COLLAB --> PG
+  MCP[MCP server / scripts] -->|Bearer dio_…| API
+```
+
+A save is **one transaction**: the document is stored, its blocks are re-projected
+from the same JSON in the same transaction, and only the blocks whose content
+actually changed are rewritten, re-embedded, and reported by
+`GET /api/pages/:id/delta?since=N`.
+
+### Repository layout
+
+```
+diomedes/
+├── client/            # React SPA (Vite, Mantine UI, TipTap editor)
+├── server/            # Express API (ESM, no build step)
+├── docs/              # API, block storage, realtime collaboration, assets
+├── scripts/           # bump-version.sh (versioning), release.sh (manual release)
+├── Dockerfile         # multi-stage: build client → install server deps → runtime
+└── docker-compose.example.yml  # diomedes + postgres + redis + watchtower
+```
+
+---
+
+## 📎 Documents (PDF / PowerPoint)
 
 Type `/document`, or drag a file into the page and it lands where you dropped it.
 Either way you get a bar on its own line: the filename on the left, download and
@@ -97,15 +276,17 @@ server directly on a host without LibreOffice is fine — the editor detects it,
 disables the PDF option, and keeps the PPTX as-is. See `SOFFICE_PATH` in
 `.env.example`.
 
-## Semantic search (optional)
+---
+
+## 🔎 Semantic search (optional)
 
 Search is Postgres full-text by default: fast, free, and exactly as it has always
 worked. Turning semantic search on adds vector similarity alongside it, so
-"how do I roll back a release" finds the runbook that only ever says "revert to
-the previous tag".
+*"how do I roll back a release"* finds the runbook that only ever says
+*"revert to the previous tag"*.
 
-Embeddings come from a local model by default — no API key, no data leaving the
-host, and nothing to install. `docker-compose.example.yml` ships an `ollama`
+Embeddings come from a local model by default — **no API key, no data leaving the
+host, and nothing to install**. `docker-compose.example.yml` ships an `ollama`
 service that downloads its own model on first boot; you turn it on with its
 compose profile:
 
@@ -122,12 +303,19 @@ EMBEDDING_DIMENSIONS=768
 volume on the first start. The container stays unhealthy until that finishes and
 the app waits on it, so no page is ever embedded against a half-downloaded
 model. Later starts find the model in the volume and come up in seconds, offline
-included. The model is deliberately not auto-updated — swapping it invalidates
-every stored vector — so upgrade by hand when you mean to:
+included.
 
-```bash
-docker compose exec ollama ollama pull nomic-embed-text
-```
+> [!WARNING]
+> The model is deliberately **not** auto-updated — swapping it invalidates every
+> stored vector. Upgrade by hand when you mean to:
+> ```bash
+> docker compose exec ollama ollama pull nomic-embed-text
+> ```
+
+<details>
+<summary><b>Tuning, alternative providers, and the health endpoint</b></summary>
+
+<br>
 
 CPU is enough (~50ms per chunk); there is a commented GPU block in the compose
 file for NVIDIA hosts. To use OpenAI instead, clear `COMPOSE_PROFILES` and the
@@ -168,11 +356,15 @@ In local dev, `SEMANTIC_SEARCH_ENABLED=true` in `.env` is the whole switch:
 installed on the host first — it holds the same port and the container replaces
 it.
 
-## Versioning & releases
+</details>
+
+---
+
+## 📦 Versioning & releases
 
 Versions bump themselves. Pushing to `main` runs
 `.github/workflows/docker-publish.yml`, which works out the bump, commits it,
-tags the commit, and publishes the image. There is nothing to do by hand.
+tags the commit, and publishes the image. **There is nothing to do by hand.**
 
 Three versions are tracked, and the two component versions are meant to drift
 apart:
@@ -205,13 +397,16 @@ tags for whichever component actually moved. Published image tags: `:latest`
 `./scripts/release.sh` still exists as an escape hatch for cutting a release by
 hand — re-releasing an old commit, or forcing a specific version.
 
+> [!IMPORTANT]
 > The bump commit is pushed to `main` by `GITHUB_TOKEN`. If you ever put branch
 > protection on `main`, give the Actions bot a bypass or the push will be
 > rejected. That token deliberately cannot trigger workflows, which is why the
 > bump and the build live in one workflow rather than two — and why this cannot
 > loop.
 
-## Auto-deployment
+---
+
+## 🚢 Auto-deployment
 
 `docker-compose.example.yml` includes a **watchtower** container that polls GHCR
 every minute and restarts the app when the tag it runs points at a new image.
@@ -235,7 +430,10 @@ If you make the GHCR package private, run `docker login ghcr.io` on the host wit
 a PAT that has `read:packages`, and uncomment the `config.json` mount on the
 watchtower service.
 
-### Recovering a lost Postgres password
+<details>
+<summary><b>Recovering a lost Postgres password</b></summary>
+
+<br>
 
 Postgres only applies `POSTGRES_PASSWORD` when it initializes an empty data
 directory — on an existing volume the original password still governs. If it's
@@ -248,20 +446,39 @@ docker compose exec db psql -U postgres -c "ALTER USER diomedes PASSWORD 'new-pa
 docker compose up -d
 ```
 
-## HTTPS via Cloudflare tunnel
+</details>
+
+<details>
+<summary><b>HTTPS via a Cloudflare tunnel</b></summary>
+
+<br>
 
 TLS terminates at Cloudflare's edge; the tunnel forwards to plain HTTP locally, so no
 certificates live on the server. In **Zero Trust → Networks → Tunnels**, point a
 public hostname (e.g. `docs.gageserver.net`) at `HTTP → localhost:3000`, and keep
 `APP_URL` in `.env` matching that hostname.
 
-## Ops cheatsheet
+</details>
+
+---
+
+## 🛠 Ops cheatsheet
 
 ```bash
-docker compose logs -f diomedes        # app logs
-docker compose logs -f watchtower      # what auto-deploy is doing
-docker compose pull && docker compose up -d   # deploy now, don't wait for the poll
-./scripts/release.sh                   # tag a release; Actions builds it
-docker exec -it diomedes-db psql -U diomedes diomedes   # db shell
+docker compose logs -f diomedes                        # app logs
+docker compose logs -f watchtower                      # what auto-deploy is doing
+docker compose pull && docker compose up -d            # deploy now, don't wait for the poll
+./scripts/release.sh                                   # tag a release; Actions builds it
+docker exec -it diomedes-db psql -U diomedes diomedes  # db shell
 docker exec diomedes-db pg_dump -U diomedes diomedes > backup.sql
 ```
+
+---
+
+<div align="center">
+<sub>
+
+**[API reference](docs/API.md)** · **[Block storage](docs/block-storage.md)** · **[Realtime collaboration](docs/realtime-collaboration.md)** · **[Feature map vs. Docmost](FEATURES.md)**
+
+</sub>
+</div>

@@ -14,7 +14,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Slash command menu (`/`) | ✅ Text, H1–H3, lists, to-do, quote, code, divider, table, image, video, file, callout, toggle, footnote, math, Mermaid, Excalidraw, Draw.io, YouTube, iframe embed |
 | Floating format toolbar on selection | ✅ Bold/italic/underline/strike/code/link/highlight/color/alignment, block type |
 | Tables (resize, row/col ops, header) | ✅ TipTap tables with column resizing and row/col menu |
-| Code blocks with syntax highlighting | ✅ highlight.js via lowlight, language picker |
+| Code blocks with syntax highlighting | ✅ highlight.js via lowlight (grammars loaded per language, on demand), searchable language picker, copy, soft wrap, line numbers, and opt-in per-language checking (JSON, YAML, SQL, Python, JavaScript) behind a workspace toggle |
 | Task lists / to-do | ✅ |
 | Callouts (info/warning/danger/success) | ✅ Custom node |
 | Toggle blocks | ✅ Custom collapsible node |
@@ -63,7 +63,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
-| Nested page tree with reordering | ✅ One level of subpages, drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space. Deeper nesting is tracked as its own feature |
+| Nested page tree with reordering | ✅ Nesting to any depth (capped at 20 levels), drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space |
 | Multi-select in the page tree | ✅ ⌘/Ctrl-click to pick pages out, Shift-click for a range. A selection drags as one pile and keeps its order on the drop; trashing one asks first |
 | Groups | ➖ Direct per-user space membership instead (small user count) |
 | Workspace roles (Owner / Admin / Member) | ✅ owner / admin / member |

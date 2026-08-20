@@ -139,5 +139,86 @@ api -X POST "$B/api/pages/$P2/move" -d '{"parentId":null,"position":0}' > /dev/n
 order | grep -q "^\['two'" || fail "MCP-style position move failed: $(order)"
 ok "the MCP server's numeric position argument still works: $(order)"
 
+# ---- depth (issue #24) ----
+#
+# The routes, not the library. server/test/integration/depth.mjs already covers
+# movePage and the depth arithmetic directly; what is only reachable over HTTP is
+# whether POST /api/pages, the bulk move and link-search agree with it. Each of
+# these was a hard "one level deep" refusal before this issue.
+#
+# `api` asserts a 2xx, so a call that must be *refused* goes through `refused`,
+# which asserts the status and returns the message for the caller to check.
+refused() {
+  local body status
+  body=$(curl -s -w '\n%{http_code}' -b "$J" -c "$J" -H 'Content-Type: application/json' "$@")
+  status=${body##*$'\n'}
+  body=${body%$'\n'*}
+  case "$status" in
+    400) printf '%s' "$body" ;;
+    *) printf '  FAIL expected HTTP 400, got %s from %s\n     %s\n' "$status" "$*" "$body" >&2; exit 1 ;;
+  esac
+}
+
+# A chain built through the API one subpage at a time. Under the old cap the
+# third call here was the one that 400'd.
+sub() { api -X POST "$B/api/pages" -d "{\"spaceId\":\"$SPACE\",\"parentId\":\"$1\",\"title\":\"$2\"}" | jqv "d['page']['id']"; }
+D1=$(mk depth-1)
+D2=$(sub "$D1" depth-2); D3=$(sub "$D2" depth-3); D4=$(sub "$D3" depth-4)
+D5=$(sub "$D4" depth-5); D6=$(sub "$D5" depth-6)
+CRUMBS=$(api "$B/api/pages/$D6" | jqv "[b['title'] for b in d['breadcrumbs']]")
+[ "$CRUMBS" = "['depth-1', 'depth-2', 'depth-3', 'depth-4', 'depth-5']" ] \
+  || fail "breadcrumbs at depth 6 wrong: $CRUMBS"
+ok "POST /api/pages nests six levels deep and breadcrumbs walk all of them"
+
+SUB=$(api "$B/api/pages/$D1/subtree" | jqv "[p['title'] for p in d['pages']]")
+[ "$SUB" = "['depth-1', 'depth-2', 'depth-3', 'depth-4', 'depth-5', 'depth-6']" ] \
+  || fail "subtree at depth 6 wrong: $SUB"
+ok "GET /pages/:id/subtree returns all six levels in document order"
+
+# Down to the limit, then one past it. The chain above is 6 long, so 14 more
+# calls put a page at level 20 — the deepest a page is allowed to be.
+TAIL=$D6
+for i in $(seq 7 20); do TAIL=$(sub "$TAIL" "depth-$i"); done
+MSG=$(refused -X POST "$B/api/pages" -d "{\"spaceId\":\"$SPACE\",\"parentId\":\"$TAIL\",\"title\":\"too deep\"}")
+echo "$MSG" | grep -q "20 levels deep" || fail "create past the limit gave the wrong error: $MSG"
+ok "creating a 21st level is refused with the limit named"
+
+# The same limit on a move, and on the bulk move, so no route is a way around it.
+STRAY=$(mk stray)
+MSG=$(refused -X POST "$B/api/pages/$STRAY/move" -d "{\"parentId\":\"$TAIL\"}")
+echo "$MSG" | grep -q "20 levels deep" || fail "move past the limit gave the wrong error: $MSG"
+MSG=$(refused -X POST "$B/api/pages/move-many" -d "{\"pageIds\":[\"$STRAY\"],\"parentId\":\"$TAIL\"}")
+echo "$MSG" | grep -q "20 levels deep" || fail "bulk move past the limit gave the wrong error: $MSG"
+ok "the move and bulk-move routes enforce the same limit"
+
+# A branch carrying subpages becoming a subpage — flatly refused before this
+# issue, regardless of how much room there was.
+B1=$(mk branch-1); B2=$(sub "$B1" branch-2); B3=$(sub "$B2" branch-3)
+api -X POST "$B/api/pages/move-many" -d "{\"pageIds\":[\"$B1\"],\"parentId\":\"$D3\"}" > /dev/null
+LVL=$(api "$B/api/pages/$B3" | jqv "len(d['breadcrumbs']) + 1")
+[ "$LVL" = "6" ] || fail "the moved branch landed at level $LVL, expected 6"
+ok "a three-deep branch bulk-moves under a level-3 page and keeps its shape"
+
+# A page must still not be moved into its own descendant, at any depth.
+MSG=$(refused -X POST "$B/api/pages/$B1/move" -d "{\"parentId\":\"$B3\"}")
+echo "$MSG" | grep -q "inside itself" || fail "cycle refusal gave the wrong error: $MSG"
+ok "moving a page under its own grandchild is still refused"
+
+# link-search takes a list of exclusions now, which is how the parent picker
+# keeps the moved page's own descendants out of the menu.
+HITS=$(api "$B/api/pages/link-search?q=branch&spaceId=$SPACE&onlySpace=1&exclude=$B1&exclude=$B2" \
+  | jqv "sorted(p['title'] for p in d['pages'])")
+[ "$HITS" = "['branch-3']" ] || fail "multi-exclude link-search returned: $HITS"
+ok "link-search excludes every id it is given, not just the first"
+
+# Restore brings back the branch that went to the trash with the page, not just
+# the row that was clicked.
+api -X DELETE "$B/api/pages/$B1" > /dev/null
+COUNT=$(api -X POST "$B/api/pages/$B1/restore" | jqv "d['restored']")
+[ "$COUNT" = "3" ] || fail "restore brought back $COUNT pages, expected 3"
+SUB=$(api "$B/api/pages/$B1/subtree" | jqv "[p['title'] for p in d['pages']]")
+[ "$SUB" = "['branch-1', 'branch-2', 'branch-3']" ] || fail "restored subtree is $SUB"
+ok "restoring a trashed branch brings back all three of its levels"
+
 echo
 echo "API end-to-end passed"

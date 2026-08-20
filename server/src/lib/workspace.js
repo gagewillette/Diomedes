@@ -31,6 +31,32 @@ export const DEFAULT_DATA_SAVINGS = {
   fileUploads: true,
 };
 
+// Code intelligence is a *compute* switch, not a bandwidth one: everything it
+// governs happens in the reader's browser. It sits beside data savings because
+// the trade-off is the same shape — an admin trading a nicety for a cheaper
+// page on old machines — but it is its own group so a write to one can never
+// clobber the other.
+export const DEFAULT_CODE_INTELLIGENCE = {
+  // Colorise code blocks by language. Off means no grammar is ever downloaded
+  // and code renders as plain monospaced text.
+  highlighting: true,
+  // Parse each block with its language's parser and show inline diagnostics.
+  linting: true,
+  // Bytes above which a block is highlighted but never parsed.
+  maxBytes: 100_000,
+};
+
+// The floor keeps the setting meaningful (below ~10 KB almost nothing would be
+// checked) and the ceiling keeps a mistyped number from handing the main thread
+// a megabyte to parse.
+export const CODE_MAX_BYTES_MIN = 10_000;
+export const CODE_MAX_BYTES_MAX = 1_000_000;
+
+const normalizeMaxBytes = (bytes) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return DEFAULT_CODE_INTELLIGENCE.maxBytes;
+  return Math.min(CODE_MAX_BYTES_MAX, Math.max(CODE_MAX_BYTES_MIN, Math.round(bytes)));
+};
+
 const normalizeSampleRate = (rate) => {
   if (typeof rate !== 'number' || !Number.isFinite(rate)) return DEFAULT_PERFORMANCE.sampleRate;
   return Math.min(1, Math.max(0, Math.round(rate * 100) / 100));
@@ -46,6 +72,11 @@ export const normalizeWorkspace = (value) => ({
     logging: value?.performance?.logging !== false,
     sampleRate: normalizeSampleRate(value?.performance?.sampleRate),
   },
+  codeIntelligence: {
+    highlighting: value?.codeIntelligence?.highlighting !== false,
+    linting: value?.codeIntelligence?.linting !== false,
+    maxBytes: normalizeMaxBytes(value?.codeIntelligence?.maxBytes),
+  },
 });
 
 export async function getWorkspace() {
@@ -60,6 +91,8 @@ export const uploadsEnabled = async () => (await getDataSavings()).fileUploads;
 export const getPerformance = async () => (await getWorkspace()).performance;
 
 export const perfLoggingEnabled = async () => (await getPerformance()).logging;
+
+export const getCodeIntelligence = async () => (await getWorkspace()).codeIntelligence;
 
 /**
  * Merge a partial data-savings patch into the stored blob, leaving the workspace
@@ -111,6 +144,30 @@ export async function setPerformance(patch) {
       ...current.performance,
       ...(typeof patch?.logging === 'boolean' ? { logging: patch.logging } : {}),
       ...(typeof patch?.sampleRate === 'number' ? { sampleRate: normalizeSampleRate(patch.sampleRate) } : {}),
+    },
+  };
+  await q(
+    `INSERT INTO settings (key, value) VALUES ('workspace', $1)
+     ON CONFLICT (key) DO UPDATE SET value = $1`,
+    [next]
+  );
+  return next;
+}
+
+/**
+ * Same merge-and-store as setDataSavings, for the code-intelligence group.
+ * Separate for the same reason: an admin turning linting off must not reset
+ * whatever the performance group happened to hold.
+ */
+export async function setCodeIntelligence(patch) {
+  const current = await getWorkspace();
+  const next = {
+    ...current,
+    codeIntelligence: {
+      ...current.codeIntelligence,
+      ...(typeof patch?.highlighting === 'boolean' ? { highlighting: patch.highlighting } : {}),
+      ...(typeof patch?.linting === 'boolean' ? { linting: patch.linting } : {}),
+      ...(typeof patch?.maxBytes === 'number' ? { maxBytes: normalizeMaxBytes(patch.maxBytes) } : {}),
     },
   };
   await q(
