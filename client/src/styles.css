@@ -41,6 +41,9 @@
   opacity: 0.55;
   transition: opacity 120ms ease, background-color 120ms ease;
   z-index: 70;
+  /* The drag is driven by pointer events, so the browser must not claim the
+     gesture as a scroll before the first pointermove arrives. */
+  touch-action: none;
 }
 /* The handle sits out in the gutter, HANDLE_GAP clear of the text column, so
    the pointer has to cross a few pixels of nothing to reach it. This invisible
@@ -57,9 +60,39 @@
   background: var(--mantine-color-default-hover);
 }
 .gd-block-handle:active { cursor: grabbing; }
-/* Once the drag is running the handle would only follow the pointer around
-   under the drag image. */
-.is-block-dragging .gd-block-handle { display: none !important; }
+/* While a block is held the handle rides along with it, so it stays under the
+   pointer that is holding it. */
+.is-block-dragging .gd-block-handle {
+  opacity: 1;
+  cursor: grabbing;
+  background: var(--mantine-color-default-hover);
+}
+
+/* ---------- dragging a block ---------- */
+/* The block under the pointer. It is the real block, lifted out of the flow
+   visually only: the document does not change until the drop, so nothing about
+   its rendering — a live diagram, a video, a collaborator's caret — restarts. */
+.gd-block-lifted {
+  position: relative;
+  z-index: 60;
+  cursor: grabbing;
+  opacity: 0.97;
+  border-radius: 6px;
+  background: var(--mantine-color-body);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+/* The blocks the dragged one displaces slide out of its way, and everything
+   settles into place after the drop — both are driven from blockDrag.js with
+   the Web Animations API rather than from here. A transition would mean an
+   inline style, and ProseMirror treats a style it did not write on one of its
+   blocks as the document having been edited by hand. The gap that opens as
+   they slide is the drop indicator; there is no separate line to draw. */
+
+/* No text selection anywhere while a block is in the air. */
+body.gd-block-drag-active {
+  user-select: none;
+  cursor: grabbing;
+}
 /* Narrow screens have no gutter to put it in. */
 @media (max-width: 768px) {
   .gd-block-handle { display: none !important; }
