@@ -2,6 +2,9 @@
 // these defaults only cover the moment before /api/auth/me answers, and public
 // share pages, which have no workspace context at all.
 
+// Mirrors WORKSPACE_NAME_MAX on the server, which rejects anything longer.
+export const WORKSPACE_NAME_MAX = 64;
+
 export const DEFAULT_WORKSPACE = {
   name: 'Diomedes',
   // Stored positively: true means the capability is on.

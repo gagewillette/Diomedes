@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { asyncRoute, httpError } from '../lib/util.js';
 import { requireAuth, requireAdmin } from '../lib/auth.js';
-import { getWorkspace, setDataSavings, setPerformance } from '../lib/workspace.js';
+import {
+  getWorkspace, setDataSavings, setPerformance, setWorkspaceName, WORKSPACE_NAME_MAX,
+} from '../lib/workspace.js';
 import { publish } from '../lib/events.js';
 import { workspaceInfo } from '../lib/workspaceInfo.js';
 
@@ -13,6 +15,26 @@ router.get(
   '/settings',
   requireAuth,
   asyncRoute(async (_req, res) => res.json({ workspace: await getWorkspace() }))
+);
+
+// Renaming the workspace changes the header for everyone, so it is admin-only
+// like the switches below.
+router.patch(
+  '/settings/name',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name) throw httpError(400, 'Workspace name is required');
+    if (name.length > WORKSPACE_NAME_MAX) {
+      throw httpError(400, `Workspace name must be ${WORKSPACE_NAME_MAX} characters or fewer`);
+    }
+
+    const workspace = await setWorkspaceName(name);
+    // Same broadcast as the switches: every open browser retitles itself.
+    publish({ type: 'workspace-settings-changed', workspace });
+    res.json({ workspace });
+  })
 );
 
 // Only workspace owners/admins change them; it is a workspace-wide switch.

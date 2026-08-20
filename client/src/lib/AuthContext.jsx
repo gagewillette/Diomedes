@@ -132,6 +132,18 @@ export function AuthProvider({ children }) {
     return data.workspace;
   }, []);
 
+  // Admin-only rename. The header reads `workspaceName`, so update both it and
+  // the settings blob rather than waiting for the SSE echo.
+  const updateWorkspaceName = useCallback(async (name) => {
+    const data = await api.patch('/api/workspace/settings/name', { name });
+    setState((s) => ({
+      ...s,
+      workspace: mergeWorkspace(data.workspace),
+      workspaceName: data.workspace.name,
+    }));
+    return data.workspace;
+  }, []);
+
   // Admin-only write; every browser (including this one) picks the change up
   // again over SSE, which is what keeps other tabs in step.
   const updateDataSavings = useCallback(async (partial) => {
@@ -153,6 +165,7 @@ export function AuthProvider({ children }) {
         updateDataSavings,
         performanceSettings: state.workspace.performance,
         updatePerformance,
+        updateWorkspaceName,
       }}
     >
       {children}

@@ -38,6 +38,7 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}, performance: {logging, sampleRate}}}` — any member |
+| PATCH | `/api/workspace/settings/name` | `{name}` — renames the workspace, admin/owner only. Trimmed, required, 64 characters max. Pushed to every browser over SSE |
 | PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
 | PATCH | `/api/workspace/settings/performance` | `{performance: {logging?: bool, sampleRate?: 0..1}}`, admin/owner only. `logging: false` stops all sample collection, client and server |
 | GET | `/api/workspace/info` | Workspace inventory: content counts, 7-day activity, per-space breakdown, storage (attachments, disk, database, per-table) and runtime (node, uptime, memory, db pool, search mode). Admin/owner only |
