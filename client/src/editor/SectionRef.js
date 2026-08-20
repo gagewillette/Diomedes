@@ -29,7 +29,7 @@ const OPAQUE = new Set(['codeBlock', 'mermaidDiagram', 'drawioDiagram', 'excalid
 const SKIPPED_MARKS = new Set(['code', 'link']);
 
 /** Collect the document's headings, in document order. */
-function collectHeadings(doc) {
+export function collectHeadings(doc) {
   const headings = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== 'heading') return true;
