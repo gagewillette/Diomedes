@@ -8,6 +8,7 @@ import { api, emitNavigate, emitPagesChanged } from '../../lib/api.js';
 import { makeSuggestionRender } from '../suggestionRender.js';
 import { subscribeTitle, getCachedTitle } from './pageTitles.js';
 import PagePicker from '../../components/PagePicker.jsx';
+import { findWikiLinkMatch } from './wikiLinkMatch.js';
 
 // Where the editor currently is. Set by Editor.jsx before rendering, so the
 // suggestion plugin — which lives outside React — knows which space to search
@@ -20,31 +21,6 @@ export const linkContext = { spaceId: null, spaceSlug: null, canWrite: false };
 const pageLinkPluginKey = new PluginKey('pageLinkSuggestion');
 
 export const pageHref = (spaceSlug, pageId) => `/s/${spaceSlug}/p/${pageId}`;
-
-// `[[` is not a single character, so the stock matcher (which builds a
-// character class from the trigger) can't express it. This walks back through
-// the current text block to the last unclosed `[[` instead.
-function findWikiLinkMatch({ $position }) {
-  if (!$position.depth || !$position.parent.isTextblock) return null;
-
-  // The placeholder keeps inline atoms one character wide, so offsets into this
-  // string still line up with document positions.
-  const textBefore = $position.parent.textBetween(0, $position.parentOffset, undefined, '￼');
-  const start = textBefore.lastIndexOf('[[');
-  if (start === -1) return null;
-
-  const query = textBefore.slice(start + 2);
-  // Bail out once the link is closed, another bracket opens, or the "title"
-  // has grown long enough that this was clearly never a link.
-  if (/[[\]\n￼]/.test(query) || query.length > 120) return null;
-
-  const contentStart = $position.start();
-  return {
-    range: { from: contentStart + start, to: contentStart + $position.parentOffset },
-    query,
-    text: textBefore.slice(start),
-  };
-}
 
 function PageLinkView({ node, updateAttributes, editor }) {
   const { pageId, label, spaceSlug } = node.attrs;
@@ -276,14 +252,14 @@ export const PageLink = Node.create({
           } else {
             attrs = { pageId: props.id, label: props.title || 'Untitled', spaceSlug: props.space_slug };
           }
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              { type: 'pageLink', attrs },
-              { type: 'text', text: ' ' },
-            ])
-            .run();
+          // The chip is followed by a space so the caret has somewhere to land,
+          // but the replaced range may already have had one after it — a link
+          // written out in full as `[[Title]] and more` is consumed through its
+          // closing brackets, and doubling the space there would be visible.
+          const after = editor.state.doc.textBetween(range.to, Math.min(range.to + 1, editor.state.doc.content.size));
+          const content = [{ type: 'pageLink', attrs }];
+          if (after !== ' ') content.push({ type: 'text', text: ' ' });
+          editor.chain().focus().insertContentAt(range, content).run();
         },
       }),
     ];
