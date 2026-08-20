@@ -3,6 +3,7 @@ import { q, pool } from '../db.js';
 import { asyncRoute, httpError, randomToken } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, getPage, accessibleSpacesQuery } from '../lib/auth.js';
 import { searchPages, notePageChanged } from '../search/index.js';
+import { removeStoredFiles } from '../lib/storage.js';
 import { getHub } from '../collab/index.js';
 import { syncPageLinks, resolveLinksByTitle, unresolveStaleTitleLinks } from '../lib/links.js';
 import { movePage, siblingOrderKeys } from '../lib/pageMove.js';
@@ -741,7 +742,13 @@ router.get(
        WHERE space_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 100`,
       [req.params.spaceId]
     );
-    res.json({ pages: rows });
+    // The list is capped; the count is not. "Delete all" has to be able to say
+    // how much it is about to destroy, including the rows past the cap.
+    const { rows: counted } = await q(
+      `SELECT count(*)::int AS total FROM pages WHERE space_id = $1 AND deleted_at IS NOT NULL`,
+      [req.params.spaceId]
+    );
+    res.json({ pages: rows, total: counted[0].total });
   })
 );
 
@@ -769,6 +776,37 @@ router.delete(
     await assertSpaceRole(req.user, page.space_id, 'admin');
     await q('DELETE FROM pages WHERE id = $1', [page.id]);
     res.json({ ok: true });
+  })
+);
+
+// Empty the trash: every deleted page in the space, gone for good. Space admins
+// only — the same bar as deleting a single page forever, since this is that
+// operation applied to everything at once.
+//
+// One statement, not a loop over `/pages/:id/permanent`: a half-emptied trash
+// after a failure partway through is a state nobody asked for, and the
+// confirmation the admin typed described all of it or none of it.
+router.delete(
+  '/spaces/:spaceId/trash',
+  asyncRoute(async (req, res) => {
+    await assertSpaceRole(req.user, req.params.spaceId, 'admin');
+    // Read the blobs before the rows: `attachments` cascades away with the
+    // pages, and once it has, nothing in the database points at the files.
+    const { rows: files } = await q(
+      `SELECT a.disk_path FROM attachments a
+       JOIN pages p ON p.id = a.page_id
+       WHERE p.space_id = $1 AND p.deleted_at IS NOT NULL`,
+      [req.params.spaceId]
+    );
+    // Versions, blocks, comments, favourites, links, chunks and the CRDT state
+    // all hang off pages with ON DELETE CASCADE, so this one DELETE is what
+    // "wipe it from the database" actually means.
+    const { rowCount } = await q(
+      'DELETE FROM pages WHERE space_id = $1 AND deleted_at IS NOT NULL',
+      [req.params.spaceId]
+    );
+    await removeStoredFiles(files.map((f) => f.disk_path));
+    res.json({ ok: true, deleted: rowCount });
   })
 );
 
