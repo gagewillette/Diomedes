@@ -10,6 +10,9 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { api, emitPagesChanged, onPagesChanged } from '../lib/api.js';
+import { useAuth } from '../lib/AuthContext.jsx';
+import { focusEditor, onFocusFileTree } from '../lib/vimFocus.js';
+import { jumpParent, moveDown, moveUp } from './vimTreeNav.js';
 import PagePicker from './PagePicker.jsx';
 import { markdownToJSON } from '../lib/markdown.js';
 import { dragState, dropIntent } from '../lib/pageDrag.js';
@@ -47,6 +50,14 @@ export default function PageTree({ space }) {
   const pathParts = pathname.split('/');
   const activePageId = pathParts[3] === 'p' ? pathParts[4] : null;
   const canWrite = ['admin', 'writer'].includes(space.my_role);
+  const { preferences } = useAuth();
+  const vim = preferences.keymap === 'vim';
+  // Ctrl+H lands in the tree of the space you are reading, not in whichever
+  // other space happens to be open in the sidebar.
+  const isCurrentSpace = pathParts[2] === space.slug;
+  const treeRef = useRef(null);
+  const [cursorId, setCursorId] = useState(null);
+  const [keyboardFocus, setKeyboardFocus] = useState(false);
 
   const load = useCallback(async () => {
     const data = await api.get(`/api/spaces/${space.id}/pages`);
@@ -85,6 +96,64 @@ export default function PageTree({ space }) {
     setExpanded(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePageId, pages]);
+
+  // Ctrl+H: take focus, starting from the page being read.
+  useEffect(() => {
+    if (!vim || !isCurrentSpace) return undefined;
+    return onFocusFileTree(() => {
+      setCursorId((current) => current || activePageId || null);
+      treeRef.current?.focus({ preventScroll: true });
+    });
+  }, [vim, isCurrentSpace, activePageId]);
+
+  // Follow the route: opening a page from anywhere puts the cursor on it.
+  useEffect(() => {
+    if (vim && activePageId) setCursorId(activePageId);
+  }, [vim, activePageId]);
+
+  // Keep the cursor row on screen as it walks past the edge of the sidebar.
+  useEffect(() => {
+    if (!vim || !cursorId || !keyboardFocus) return;
+    treeRef.current
+      ?.querySelector(`[data-page-id="${cursorId}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [vim, cursorId, keyboardFocus, expanded, pages]);
+
+  const applyMove = (move) => {
+    if (!move) return;
+    if (move.expand.length) setExpanded((s) => new Set([...s, ...move.expand]));
+    setCursorId(move.id);
+  };
+
+  const onTreeKeyDown = (e) => {
+    if (!vim || e.metaKey || e.ctrlKey || e.altKey) return;
+    const cursor = cursorId || activePageId;
+    switch (e.key) {
+      case 'j':
+        applyMove(moveDown(childrenOf, expanded, cursor));
+        break;
+      case 'k':
+        applyMove(moveUp(childrenOf, expanded, cursor));
+        break;
+      case '}':
+        applyMove(jumpParent(childrenOf, pages, cursor, 1));
+        break;
+      case '{':
+        applyMove(jumpParent(childrenOf, pages, cursor, -1));
+        break;
+      case 'Enter':
+        if (cursor) navigate(`/s/${space.slug}/p/${cursor}`);
+        break;
+      case 'Escape':
+        treeRef.current?.blur();
+        focusEditor();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   const createPage = async (parentId = null) => {
     try {
@@ -320,11 +389,13 @@ export default function PageTree({ space }) {
         <Group
           gap={2}
           wrap="nowrap"
+          data-page-id={page.id}
           className={[
             'gd-tree-row',
             page.id === activePageId ? 'is-active' : '',
             dragging === page.id ? 'is-dragging' : '',
             rowDropClass(page.id),
+            vim && keyboardFocus && page.id === (cursorId || activePageId) ? 'is-vim-cursor' : '',
           ].filter(Boolean).join(' ')}
           style={{ paddingLeft: 4 + depth * 14 }}
           draggable={canWrite}
@@ -349,7 +420,10 @@ export default function PageTree({ space }) {
           </ActionIcon>
           <UnstyledButton
             className="gd-tree-label"
-            onClick={() => navigate(`/s/${space.slug}/p/${page.id}`)}
+            onClick={() => {
+              setCursorId(page.id);
+              navigate(`/s/${space.slug}/p/${page.id}`);
+            }}
           >
             <Group gap={6} wrap="nowrap">
               {page.icon ? <span>{page.icon}</span> : <IconFileText size={14} opacity={0.6} />}
@@ -436,7 +510,16 @@ export default function PageTree({ space }) {
 
   const roots = childrenOf.get('root') || [];
   return (
-    <div className="gd-tree">
+    <div
+      className={`gd-tree ${vim && keyboardFocus ? 'is-vim-focus' : ''}`}
+      ref={treeRef}
+      tabIndex={vim ? -1 : undefined}
+      onKeyDown={vim ? onTreeKeyDown : undefined}
+      onFocus={vim ? () => setKeyboardFocus(true) : undefined}
+      onBlur={vim ? (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setKeyboardFocus(false);
+      } : undefined}
+    >
       <input
         ref={importInputRef} type="file" accept=".md,.markdown,.txt" hidden
         onChange={(e) => {
