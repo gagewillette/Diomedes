@@ -568,3 +568,58 @@
   .gd-remote-caret,
   .gd-presence { display: none; }
 }
+
+/* ── Vim emulation ──────────────────────────────────────────────────────── */
+
+/* Normal mode sits *on* a character rather than between two, so the caret is
+   drawn as a block over the character under the cursor. */
+.gd-vim-block-cursor {
+  background: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+  border-radius: 1px;
+}
+.gd-editor.gd-vim-normal,
+.gd-editor.gd-vim-visual,
+.gd-editor.gd-vim-command { caret-color: transparent; }
+
+.gd-vim-status {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-dimmed);
+}
+.gd-vim-status.is-insert { color: var(--mantine-color-green-text); }
+.gd-vim-status.is-visual { color: var(--mantine-color-orange-text); }
+.gd-vim-status.is-command { color: var(--mantine-color-text); }
+.gd-vim-mode { font-weight: 700; }
+.gd-vim-pending { margin-left: auto; opacity: 0.75; }
+.gd-vim-message { opacity: 0.9; }
+.gd-vim-cmdline { display: inline-flex; align-items: center; }
+.gd-vim-cmdcaret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 1px;
+  background: currentColor;
+  animation: gd-vim-blink 1s steps(1) infinite;
+}
+@keyframes gd-vim-blink { 50% { opacity: 0; } }
+
+/* The tree cursor. Distinct from .is-active, which marks the page that is
+   actually open — with vim they are often two different rows. */
+.gd-tree:focus { outline: none; }
+.gd-tree.is-vim-focus { box-shadow: inset 2px 0 0 var(--mantine-color-blue-filled); }
+.gd-tree-row.is-vim-cursor {
+  background: var(--mantine-color-default-hover);
+  box-shadow: inset 0 0 0 1px var(--mantine-color-blue-filled);
+  border-radius: 4px;
+}

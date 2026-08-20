@@ -23,6 +23,7 @@ import { usePeers } from '../editor/collab/presence.js';
 import { pickUserColor } from '../lib/userColor.js';
 import BacklinksPanel from '../components/BacklinksPanel.jsx';
 import PagePicker from '../components/PagePicker.jsx';
+import { onFocusEditor, onRequestSave } from '../lib/vimFocus.js';
 
 export default function PageEditor() {
   const { pageId, slug } = useParams();
@@ -153,6 +154,16 @@ export default function PageEditor() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+  }, [saveContent]);
+
+  // Ctrl+L from anywhere, and `:w` from the editor's own command line.
+  useEffect(() => {
+    const offFocus = onFocusEditor(() => editorRef.current?.commands.focus());
+    const offSave = onRequestSave(() => {
+      clearTimeout(saveTimer.current);
+      saveContent(editorRef.current);
+    });
+    return () => { offFocus(); offSave(); };
   }, [saveContent]);
 
   // flush pending save on unmount/page switch
