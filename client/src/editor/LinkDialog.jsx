@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMarkRange } from '@tiptap/core';
 import {
   Alert, Button, Group, Modal, Stack, Text, TextInput,
 } from '@mantine/core';
-import { IconAlertTriangle, IconExternalLink, IconLinkOff } from '@tabler/icons-react';
-import { normalizeUrl, isValidUrl, isExternalUrl, linkHost } from './linkUrl.js';
+import { IconAlertTriangle, IconCheck, IconExternalLink, IconLinkOff } from '@tabler/icons-react';
+import { normalizeUrl, isValidUrl, isExternalUrl, linkHost, linkSafety } from './linkUrl.js';
+
+// The same traffic light the hover card shows, so a link means one thing in
+// both places.
+const VERDICT_COLOR = { safe: 'green', caution: 'yellow', unsafe: 'red' };
 
 /**
  * What the dialog should start with, given where the caret is.
@@ -15,10 +19,23 @@ import { normalizeUrl, isValidUrl, isExternalUrl, linkHost } from './linkUrl.js'
  * which may be empty: linking from a bare caret is how you insert a link whose
  * text you are about to type.
  */
-function readSelection(editor) {
+function readSelection(editor, explicit) {
   const { state } = editor;
   const { from, to, empty } = state.selection;
   const linkType = state.schema.marks.link;
+
+  // The hover card knows exactly which link was clicked and hands its range
+  // over; the caret may be somewhere else entirely by then.
+  if (explicit) {
+    return {
+      from: explicit.from,
+      to: explicit.to,
+      text: state.doc.textBetween(explicit.from, explicit.to, ' ', ' '),
+      href: state.doc.resolve(explicit.from + 1).marks().find((m) => m.type === linkType)?.attrs.href || '',
+      hadLink: true,
+    };
+  }
+
   const range = linkType ? getMarkRange(state.doc.resolve(from), linkType) : null;
 
   // A selection that reaches past the link is an ordinary selection: the person
@@ -51,6 +68,7 @@ function LinkDialog({ opened, seed, onClose, onApply, onRemove }) {
   const valid = isValidUrl(url);
   const host = linkHost(url);
   const external = isExternalUrl(url);
+  const verdict = linkSafety(url);
   const error = touched && url.trim() && !valid
     ? 'That does not look like a web address. Try https://example.com'
     : null;
@@ -61,14 +79,15 @@ function LinkDialog({ opened, seed, onClose, onApply, onRemove }) {
     onApply({ text, href });
   };
 
-  // A link with nowhere to open is not worth testing, so the button says so
-  // rather than opening a blank tab.
+  // Testing an address we would refuse to store must do nothing at all — no
+  // tab, no navigation, not even a blank window. The button is disabled while
+  // the address is unusable, and this re-checks anyway: `disabled` is a
+  // property of a rendered button, and the only thing that can be trusted to
+  // stand between `javascript:` and `window.open` is the check right here.
   const test = () => {
-    if (!valid) {
-      setTouched(true);
-      return;
-    }
-    window.open(href, '_blank', 'noopener,noreferrer');
+    const target = normalizeUrl(url);
+    if (!target) return;
+    window.open(target, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -95,10 +114,15 @@ function LinkDialog({ opened, seed, onClose, onApply, onRemove }) {
         />
 
         {external && valid && (
-          <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={16} />} p="xs">
+          <Alert
+            color={VERDICT_COLOR[verdict.level]}
+            variant="light"
+            icon={verdict.level === 'safe' ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />}
+            p="xs"
+          >
             <Text size="xs">
-              This opens <b>{host}</b> in a new tab. Only link to sites you trust — anyone who can
-              read this page can click it, and a link's text can say anything at all.
+              This opens <b>{host}</b> in a new tab. {verdict.reason} Only link to sites you trust —
+              anyone who can read this page can click it, and a link's text can say anything at all.
             </Text>
           </Alert>
         )}
@@ -149,10 +173,19 @@ function LinkDialog({ opened, seed, onClose, onApply, onRemove }) {
  */
 export function useLinkDialog(editor) {
   const [seed, setSeed] = useState(null);
+  // Closing is animated, and the dialog keeps rendering through the fade. With
+  // the seed already cleared it would spend that fade retitled "Add link" with
+  // its Remove button gone — a visible flicker on the way out. Holding the last
+  // seed lets it fade out looking like the dialog that was just dismissed.
+  const lastSeed = useRef(null);
+  if (seed) lastSeed.current = seed;
 
-  const open = useCallback(() => {
+  // `range` is optional: the toolbar works from the live selection, the hover
+  // card names the link it was pointing at.
+  const open = useCallback((range) => {
     if (!editor) return;
-    setSeed(readSelection(editor));
+    const explicit = range && typeof range.from === 'number' ? range : null;
+    setSeed(readSelection(editor, explicit));
   }, [editor]);
 
   const close = useCallback(() => setSeed(null), []);
@@ -187,7 +220,7 @@ export function useLinkDialog(editor) {
   const element = (
     <LinkDialog
       opened={Boolean(seed)}
-      seed={seed}
+      seed={seed ?? lastSeed.current}
       onClose={close}
       onApply={apply}
       onRemove={remove}

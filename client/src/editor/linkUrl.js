@@ -64,6 +64,95 @@ export function isExternalUrl(input) {
   return !url.startsWith('/') && !url.startsWith('#');
 }
 
+// Hosts that deliberately hide where a link goes. Not malicious in themselves,
+// but a reader cannot judge the destination from the text, which is exactly the
+// judgement the hover card exists to support.
+const SHORTENERS = new Set([
+  'bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'buff.ly', 'is.gd',
+  'rebrand.ly', 'cutt.ly', 'shorturl.at', 'rb.gy', 'lnkd.in', 't.ly',
+]);
+
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+/**
+ * How much a reader should trust this address, as a traffic light.
+ *
+ * `unsafe` is reserved for things that are actively deceptive or that a browser
+ * should never be handed: a scheme we refuse, a host disguised with embedded
+ * credentials (`https://docs.google.com@evil.example`, which reads as Google
+ * and goes to evil.example), or a punycode host that can spell a familiar name
+ * in another alphabet.
+ *
+ * `caution` is for links that are fine but worth a second look — unencrypted
+ * http, a bare IP address, an odd port, or a shortener that hides its
+ * destination.
+ *
+ * Everything else is `safe`, which here means "nothing about the address itself
+ * is suspicious" — not that the site is trustworthy. That judgement stays with
+ * the reader, which is why the card shows the host rather than just a verdict.
+ */
+export function linkSafety(input) {
+  const url = normalizeUrl(input);
+  if (!url) return { level: 'unsafe', label: 'Blocked', reason: 'This address cannot be opened safely.' };
+
+  if (!isExternalUrl(url)) {
+    return { level: 'safe', label: 'This wiki', reason: 'Stays inside this workspace.' };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { level: 'unsafe', label: 'Blocked', reason: 'This address cannot be opened safely.' };
+  }
+
+  if (parsed.protocol === 'mailto:' || parsed.protocol === 'tel:') {
+    return { level: 'safe', label: 'Contact', reason: 'Opens your mail or phone app.' };
+  }
+
+  // `new URL` puts anything before the `@` into username/password. That is the
+  // oldest trick for making a link read as one site and go to another.
+  if (parsed.username || parsed.password) {
+    return {
+      level: 'unsafe',
+      label: 'Deceptive',
+      reason: `Text before the @ hides the real destination, which is ${parsed.hostname}.`,
+    };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+
+  if (host.startsWith('xn--') || host.includes('.xn--')) {
+    return {
+      level: 'unsafe',
+      label: 'Lookalike',
+      reason: 'This host uses non-Latin characters that can imitate a familiar name.',
+    };
+  }
+
+  if (SHORTENERS.has(host)) {
+    return {
+      level: 'caution',
+      label: 'Shortened',
+      reason: 'A shortener hides where this actually goes until you open it.',
+    };
+  }
+
+  if (IPV4_RE.test(host)) {
+    return { level: 'caution', label: 'IP address', reason: 'Goes to a raw address with no site name.' };
+  }
+
+  if (parsed.protocol === 'http:') {
+    return { level: 'caution', label: 'Not encrypted', reason: 'http:// traffic can be read in transit.' };
+  }
+
+  if (parsed.port && parsed.port !== '443') {
+    return { level: 'caution', label: `Port ${parsed.port}`, reason: 'Uses an unusual port for the web.' };
+  }
+
+  return { level: 'safe', label: 'Looks fine', reason: 'Encrypted, and the address matches the site it names.' };
+}
+
 /**
  * The part of a URL a person actually reads when deciding whether to trust it:
  * the host. Returns '' for in-app paths, which have no host to speak of.

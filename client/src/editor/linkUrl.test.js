@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUrl, isValidUrl, isExternalUrl, linkHost } from './linkUrl.js';
+import { normalizeUrl, isValidUrl, isExternalUrl, linkHost, linkSafety } from './linkUrl.js';
 
 test('keeps a full URL as typed', () => {
   assert.equal(normalizeUrl('https://example.com/a?b=1#c'), 'https://example.com/a?b=1#c');
@@ -60,4 +60,44 @@ test('host is what a reader checks before trusting a link', () => {
   assert.equal(linkHost('mailto:someone@example.com'), 'someone@example.com');
   assert.equal(linkHost('/s/eng/p/abc'), '');
   assert.equal(linkHost('javascript:alert(1)'), '');
+});
+
+test('safety: an ordinary https address is safe', () => {
+  assert.equal(linkSafety('https://example.com/a').level, 'safe');
+  assert.equal(linkSafety('example.com').level, 'safe');
+  assert.equal(linkSafety('/s/eng/p/abc').level, 'safe');
+  assert.equal(linkSafety('#top').level, 'safe');
+  assert.equal(linkSafety('mailto:a@b.com').level, 'safe');
+});
+
+test('safety: credentials before the @ are deceptive', () => {
+  const verdict = linkSafety('https://docs.google.com@evil.example/login');
+  assert.equal(verdict.level, 'unsafe');
+  assert.match(verdict.reason, /evil\.example/);
+});
+
+test('safety: punycode hosts can imitate a familiar name', () => {
+  assert.equal(linkSafety('https://xn--80ak6aa92e.com').level, 'unsafe');
+  assert.equal(linkSafety('https://login.xn--80ak6aa92e.com').level, 'unsafe');
+});
+
+test('safety: a refused scheme reports as unsafe rather than throwing', () => {
+  assert.equal(linkSafety('javascript:alert(1)').level, 'unsafe');
+  assert.equal(linkSafety('').level, 'unsafe');
+});
+
+test('safety: worth-a-second-look links are caution, not unsafe', () => {
+  assert.equal(linkSafety('http://example.com').level, 'caution');
+  assert.equal(linkSafety('https://bit.ly/abc').level, 'caution');
+  assert.equal(linkSafety('https://192.168.1.10/admin').level, 'caution');
+  assert.equal(linkSafety('https://example.com:8443/a').level, 'caution');
+});
+
+test('safety: every verdict carries something to show the reader', () => {
+  for (const url of ['https://example.com', 'http://example.com', 'javascript:alert(1)', '/s/eng/p/a']) {
+    const verdict = linkSafety(url);
+    assert.ok(verdict.label, url);
+    assert.ok(verdict.reason, url);
+    assert.ok(['safe', 'caution', 'unsafe'].includes(verdict.level), url);
+  }
 });
