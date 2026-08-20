@@ -109,13 +109,22 @@ export async function writePageBody({ pageId, content, title, icon, userId, conn
 }
 
 /**
- * Project a page's blocks for the first time, for a page created with a body.
+ * A page written before this migration has no rows in `page_blocks` until it is
+ * next saved. That is deliberate, and there is no backfill.
  *
- * Creation already inserts the document in one statement so the page is never
- * observable half-made; this reprojects from what was inserted rather than
- * duplicating that insert here.
+ * Nothing reads the projection yet — `GET /pages/:id/blocks` and the delta
+ * endpoint are the substrate for a local-first cache that is not built. Reading,
+ * editing, full-text search and semantic search all go through `pages.content`
+ * exactly as before, so an unprojected page has no symptom. The first ordinary
+ * save projects it, mints its block ids and writes them back.
+ *
+ * Semantic search stays correct across that boundary without special handling:
+ * chunks written before the migration carry an empty `source_block_ids`, and
+ * chunk reuse is keyed on content rather than on block attribution, so the
+ * chunks whose text did not change are still reused on that first save.
+ *
+ * If a backfill is ever wanted — most plausibly when the cache lands and starts
+ * depending on the projection — it is a loop over pages with `rev = 0` calling
+ * `writePageBody`, and it must leave `updated_at`/`updated_by` alone so it does
+ * not push every page to the top of "recently updated".
  */
-export async function projectNewPage({ pageId, content, userId, conn }) {
-  const { blocks } = splitBlocks(content);
-  return materializeBlocks(conn, { pageId, blocks, rev: 1, userId });
-}

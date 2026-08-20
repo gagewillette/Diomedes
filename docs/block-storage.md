@@ -212,7 +212,30 @@ BASE_URL=http://localhost:3111 test/integration/api.sh
 drift, then asserts every sibling list survives the float-to-order-key migration
 in the same order.
 
-## 7. What this does not deliver
+## 7. Pages written before this migration
+
+They have no rows in `page_blocks` until they are next saved, and **there is no
+backfill**. That is a deliberate choice, not an omission.
+
+Nothing reads the projection yet — `/blocks` and `/delta` are substrate for a
+cache that is not built. Reading, editing, full-text search and semantic search
+all go through `pages.content` exactly as before, so an unprojected page has no
+symptom. The first ordinary save projects it, mints its ids and writes them back.
+Markdown import and every other way of *creating* a page is unaffected: those go
+through `writePageBody` and are block-structured from the moment they exist.
+
+Semantic search stays correct across that boundary for free. Chunks written
+before the migration carry an empty `source_block_ids`, and chunk reuse is keyed
+on content rather than block attribution — so on that first save, the chunks
+whose text did not change are still reused.
+
+The natural moment to add a backfill is when the cache lands and starts depending
+on the projection. By then most active pages will have converted themselves. It
+would be a loop over pages with `rev = 0` calling `writePageBody`, leaving
+`updated_at`/`updated_by` alone so it does not push every page to the top of
+"recently updated".
+
+## 8. What this does not deliver
 
 - **No character-level merge from blocks.** That is the CRDT's job, and it
   already does it. `blockId` is the designed join point if the CRDT is ever
