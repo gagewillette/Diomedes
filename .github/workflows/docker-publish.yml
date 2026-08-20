@@ -131,11 +131,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # The `semver` patterns only fire on tag pushes. An auto-bumped run is
-          # a branch push — its tag is created inside the run, after the event —
-          # so the version tags are added explicitly from the bump output.
+          # `latest`/`prod` and `stage` are disjoint by construction: this
+          # workflow only fires on pushes to main (or a v* tag), and
+          # staging-publish.yml is the only thing that ever writes the
+          # `stage` tag, on pushes to the staging branch. Neither workflow
+          # writes the other's tag, so watchtower on each host only ever sees
+          # updates for the tag its compose file is pinned to. `prod` is an
+          # explicit alias for `latest` so a compose file can pin to it
+          # without relying on `latest`'s implicit meaning.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=prod,enable={{is_default_branch}}
             type=raw,value=${{ needs.version.outputs.release_version }},enable=${{ needs.version.outputs.bumped == 'true' }}
             type=raw,value=${{ needs.version.outputs.release_minor }},enable=${{ needs.version.outputs.bumped == 'true' }}
             type=semver,pattern={{version}}

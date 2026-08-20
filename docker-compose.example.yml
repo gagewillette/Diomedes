@@ -9,6 +9,12 @@
 # Watchtower polls every minute and restarts the app when a new image is
 # published. Postgres and Redis are pinned to exact patch versions and are left
 # alone by watchtower; upgrade them deliberately.
+#
+# DIOMEDES_VERSION only ever resolves to a prod tag (latest/prod/a semver) —
+# docker-publish.yml is the only workflow that writes those, on push to main.
+# It never writes `stage`, so this container can never pick up a staging
+# build. The staging stack (docker-compose.staging.yml) is pinned to the
+# `stage` tag instead, which only staging-publish.yml writes.
 
 services:
   diomedes:
