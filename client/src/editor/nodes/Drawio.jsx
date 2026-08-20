@@ -6,6 +6,7 @@ import { IconZoomScan } from '@tabler/icons-react';
 import { openDiagramLightbox, useZoomClickHandlers } from '../DiagramLightbox';
 import { DRAWIO_ORIGIN, renderDrawioXml } from '../drawioRender.js';
 import { focusBelowDiagram, selectDiagramNode } from '../diagramFlow.js';
+import { claimDiagramEditor } from './diagramAutoOpen.js';
 
 function DrawioView({ node, updateAttributes, editor, selected, getPos }) {
   const [open, setOpen] = useState(false);
@@ -15,11 +16,11 @@ function DrawioView({ node, updateAttributes, editor, selected, getPos }) {
   const xmlRef = useRef(node.attrs.xml);
   const colorScheme = useComputedColorScheme('light');
 
+  // A diagram the reader just inserted opens straight into its editor. The
+  // request is claimed once, from memory — never from the document, which would
+  // re-open the editor on every later mount. See diagramAutoOpen.js.
   useEffect(() => {
-    if (node.attrs.autoOpen && editor.isEditable) {
-      updateAttributes({ autoOpen: false });
-      setOpen(true);
-    }
+    if (editor.isEditable && claimDiagramEditor('drawioDiagram')) setOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -188,7 +189,6 @@ export const DrawioBlock = Node.create({
     return {
       xml: { default: '' },
       svg: { default: '' },
-      autoOpen: { default: false, rendered: false },
     };
   },
   parseHTML() {
