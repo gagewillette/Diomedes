@@ -11,6 +11,7 @@ import { convertToPdf, pdfConversionAvailable } from '../lib/convert.js';
 import { uploadsEnabled, uploadMaxBytes, getWorkspace } from '../lib/workspace.js';
 import { PDF_MIME, docTypeFor, inlineAllowed } from '../lib/doctypes.js';
 import { STORAGE_PATH } from '../lib/storage.js';
+import { publicLinkTargets } from '../lib/publicLinks.js';
 
 export { STORAGE_PATH };
 
@@ -260,7 +261,11 @@ router.get(
     );
     if (!rows[0]) throw httpError(404, 'This link is invalid or has been revoked');
     const workspace = await getWorkspace();
-    res.json({ page: rows[0], workspaceName: workspace.name });
+    // The share tokens of the pages this one links to, so a guest following an
+    // in-page link to another public page stays on the public side of the app
+    // instead of hitting the login screen. See lib/publicLinks.js.
+    const publicLinks = await publicLinkTargets(rows[0].content);
+    res.json({ page: rows[0], workspaceName: workspace.name, publicLinks });
   })
 );
 
