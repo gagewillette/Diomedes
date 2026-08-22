@@ -129,6 +129,20 @@ export default function PageEditor() {
     [pageId, slug, navigate]
   );
 
+  // The public link was switched on or off somewhere else — another tab, or a
+  // colleague in this same page. The share state is a permission, so it is not
+  // allowed to drift: the switch and the copyable URL here follow the server's
+  // answer rather than whatever this tab last set.
+  useEffect(
+    () =>
+      onAppEvent('page-share-changed', (e) => {
+        const d = e.detail || {};
+        if (d.pageId !== pageId) return;
+        setShareToken(d.shared ? d.token || null : null);
+      }),
+    [pageId]
+  );
+
   const canWrite = data && ['admin', 'writer'].includes(data.myRole);
 
   // Live collaboration session for this page. Readers join too — presence is

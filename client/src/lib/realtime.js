@@ -8,6 +8,7 @@ const EVENT_TYPES = [
   'workspace-settings-changed',
   'pages-changed',
   'page-moved',
+  'page-share-changed',
 ];
 
 const MAX_ATTEMPTS = 8;
@@ -17,6 +18,19 @@ const MAX_BACKOFF_MS = 30_000;
 // after a dropped stream comes back, since events sent while we were offline
 // are gone — the caller should re-fetch instead of trusting its cached state.
 export function startRealtime(onEvent) {
+  return startStream('/api/events', EVENT_TYPES, onEvent);
+}
+
+// The same stream for a guest reading /share/:token, who has no session and so
+// cannot use the endpoint above. It carries one kind of news — this link was
+// revoked, or shared again — and the viewer acts on it immediately, which is
+// the whole point: a link that has been turned off should stop working where it
+// is already open, not at the reader's next refresh.
+export function startPublicRealtime(token, onEvent) {
+  return startStream(`/api/public/${encodeURIComponent(token)}/events`, ['page-share-changed'], onEvent);
+}
+
+function startStream(url, types, onEvent) {
   if (typeof EventSource === 'undefined') return () => {};
 
   let source = null;
@@ -27,7 +41,7 @@ export function startRealtime(onEvent) {
 
   const open = () => {
     if (stopped || source) return;
-    const es = new EventSource('/api/events');
+    const es = new EventSource(url);
     source = es;
 
     es.onopen = () => {
@@ -37,7 +51,7 @@ export function startRealtime(onEvent) {
       if (wasDropped) onEvent('reconnected', {});
     };
 
-    for (const type of EVENT_TYPES) {
+    for (const type of types) {
       es.addEventListener(type, (e) => {
         let detail = {};
         try {
