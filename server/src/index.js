@@ -15,6 +15,7 @@ import spaceRoutes from './routes/spaces.js';
 import pageRoutes from './routes/pages.js';
 import fileRoutes, { STORAGE_PATH } from './routes/files.js';
 import tokenRoutes from './routes/tokens.js';
+import transferRoutes from './routes/transfer.js';
 import workspaceRoutes from './routes/workspace.js';
 import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
@@ -77,6 +78,10 @@ async function main() {
   app.get('/api/health', async (_req, res) => res.json({ ok: true, search: await searchHealth() }));
   app.use('/api/auth', authRoutes(redis));
   app.use('/api/users', userRoutes);
+  // Before spaceRoutes: transferRoutes owns /api/spaces/import, and spaceRoutes
+  // guards its whole router with requireAuth behind a `/:slug` pattern that
+  // would otherwise get first refusal on that path.
+  app.use('/api', transferRoutes);
   app.use('/api/spaces', spaceRoutes);
   app.use('/api/tokens', tokenRoutes);
   app.use('/api/events', eventRoutes);

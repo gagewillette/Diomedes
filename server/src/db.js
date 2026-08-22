@@ -215,7 +215,7 @@ CREATE INDEX IF NOT EXISTS perf_samples_name_idx ON perf_samples (kind, name, ts
 --
 -- Only the sha256 of the secret is stored, like api_tokens: the plaintext is
 -- shown once, at mint time, and cannot be recovered from a database dump.
--- `key_prefix` is the first few characters, kept so the management list can
+-- key_prefix is the first few characters, kept so the management list can
 -- name a key without being able to reconstruct it.
 CREATE TABLE IF NOT EXISTS space_export_keys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
