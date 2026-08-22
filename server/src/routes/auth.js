@@ -4,7 +4,6 @@ import { q } from '../db.js';
 import { asyncRoute, httpError, slugify } from '../lib/util.js';
 import { requireAuth } from '../lib/auth.js';
 import { getWorkspace } from '../lib/workspace.js';
-import { release } from '../lib/sessionLock.js';
 
 const USERNAME_RE = /^[a-zA-Z0-9._@-]{2,64}$/;
 
@@ -77,18 +76,9 @@ export default function authRoutes(redis) {
     })
   );
 
-  // Logging out hands the account's active-window claim back before the
-  // session goes, so the user can sign in from another window straight away
-  // instead of being told they are already active somewhere.
-  router.post(
-    '/logout',
-    asyncRoute(async (req, res) => {
-      const userId = req.session?.userId;
-      const clientId = req.body?.clientId;
-      if (userId && clientId) await release(userId, clientId).catch(() => {});
-      req.session.destroy(() => res.json({ ok: true }));
-    })
-  );
+  router.post('/logout', (req, res) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
 
   router.get(
     '/me',

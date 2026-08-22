@@ -15,10 +15,9 @@ import WorkspaceInfo from './pages/WorkspaceInfo.jsx';
 import SharePage from './pages/SharePage.jsx';
 import { onNavigate } from './lib/api.js';
 import { DiagramLightboxHost } from './editor/DiagramLightbox';
-import InactiveWindowOverlay from './components/InactiveWindowOverlay.jsx';
 
 function Protected({ children }) {
-  const { loading, user, activeWindow } = useAuth();
+  const { loading, user } = useAuth();
   const location = useLocation();
   if (loading)
     return (
@@ -30,32 +29,7 @@ function Protected({ children }) {
     const from = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?from=${from}`} replace />;
   }
-  // The account is open in another window. The app still mounts underneath —
-  // taking the session over should drop the user back into what they were
-  // looking at, not reload them to the top — but the overlay covers it and
-  // `inert` keeps keyboard and pointer out of a view they are not driving.
-  const blocked = activeWindow?.status === 'blocked';
-  return (
-    <>
-      {/* display:contents so this wrapper never becomes a box of its own —
-          Layout's full-height shell has to keep laying out as if it were the
-          direct child, blocked or not. */}
-      <div
-        style={{ display: 'contents' }}
-        inert={blocked ? '' : undefined}
-        aria-hidden={blocked || undefined}
-      >
-        {children}
-      </div>
-      {blocked && (
-        <InactiveWindowOverlay
-          holder={activeWindow.holder}
-          switching={activeWindow.switching}
-          onSwitch={activeWindow.takeOver}
-        />
-      )}
-    </>
-  );
+  return children;
 }
 
 // Wiki links are rendered deep inside the editor, which also mounts on public
