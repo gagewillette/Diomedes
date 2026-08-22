@@ -41,7 +41,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Docmost capability | Diomedes |
 |---|---|
 | Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ✅ Yjs CRDT over a websocket at `/api/collab/<pageId>`, persisted to postgres and mirrored between app processes over Redis. Live carets while typing, Miro-style mouse pointers while reading, colours derived from the user id — see [docs/realtime-collaboration.md](docs/realtime-collaboration.md) |
-| Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
+| Comments (inline, threaded) | ✅ Threaded comments with resolve, page-level or anchored to a highlighted phrase; hovering an anchored comment jumps to and highlights its text |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
 | Find in page (Ctrl/⌘+F) | ✅ Overrides the browser's find — literal or regular-expression search with match counter, next/previous, case toggle and in-place highlighting; works on shared read-only pages too |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |

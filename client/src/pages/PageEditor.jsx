@@ -18,6 +18,7 @@ import { downloadFile } from '../lib/markdown.js';
 import { exportPageZip } from '../lib/exportZip.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
+import { scrollToComment, setActiveComment } from '../editor/CommentHighlight.js';
 import HistoryModal from '../components/HistoryModal.jsx';
 import FindBar from '../components/FindBar.jsx';
 import PresenceBar from '../components/PresenceBar.jsx';
@@ -41,6 +42,17 @@ export default function PageEditor() {
   const [saveState, setSaveState] = useState('saved'); // saved | saving | error
   const [shareToken, setShareToken] = useState(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  // The comment list lives here rather than in the panel, because the editor
+  // needs it too: the highlights in the document are drawn from the same list,
+  // and they have to be there whether the panel is open or not.
+  const [comments, setComments] = useState([]);
+  // The text a "Comment on this" click selected, waiting for someone to type
+  // the comment itself.
+  const [pendingAnchor, setPendingAnchor] = useState(null);
+  // Which comments the editor could actually find in the document. Reported by
+  // the highlight plugin rather than asked for, because the answer is only known
+  // after the comment list has reached it — see its `view()`.
+  const [resolvedIds, setResolvedIds] = useState(() => new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
@@ -133,6 +145,54 @@ export default function PageEditor() {
         : null,
     [user]
   );
+
+  const loadComments = useCallback(async () => {
+    if (!pageId) return;
+    try {
+      const data = await api.get(`/api/pages/${pageId}/comments`);
+      setComments(data.comments);
+    } catch {
+      // A page whose comments will not load is still a page worth reading. The
+      // highlights are simply absent; the panel shows an empty list.
+    }
+  }, [pageId]);
+
+  // Loaded with the page, not with the panel: the highlights are part of the
+  // document as it is read, and waiting for someone to open the sidebar would
+  // mean commented text looks uncommented until they do.
+  useEffect(() => {
+    setComments([]);
+    setPendingAnchor(null);
+    loadComments();
+  }, [pageId, loadComments]);
+
+  // "Comment on this text" from the selection toolbar. A null anchor means the
+  // selection was not a phrase — the panel opens for a page-level comment,
+  // which is the honest fallback rather than a silent no-op.
+  const startComment = useCallback((anchor) => {
+    setPendingAnchor(anchor);
+    setCommentsOpen(true);
+  }, []);
+
+  // Hovering a comment sends the document to its text and lights it up; leaving
+  // puts it back. Both are pure view state — no selection is moved, so an author
+  // mid-sentence keeps their caret. See scrollToComment.
+  const previewComment = useCallback((id) => {
+    scrollToComment(editorRef.current, id);
+  }, []);
+
+  const endPreview = useCallback(() => {
+    setActiveComment(editorRef.current, null);
+  }, []);
+
+  // Clicking the highlighted text is the same relationship read the other way.
+  const activateComment = useCallback((id) => {
+    setCommentsOpen(true);
+    setActiveComment(editorRef.current, id);
+  }, []);
+
+  // Whether a comment's text can still be found in the document as it stands.
+  const isResolvable = useCallback((id) => resolvedIds.has(id), [resolvedIds]);
 
   const saveContent = useCallback(async (editor) => {
     if (!editor) return;
@@ -505,6 +565,10 @@ export default function PageEditor() {
           collab={collab}
           me={me}
           onSaveState={setSaveState}
+          comments={comments}
+          onAddComment={startComment}
+          onActivateComment={activateComment}
+          onCommentsResolved={setResolvedIds}
           space={data.space}
           onUpdate={onEditorUpdate}
           onReady={(editor) => {
@@ -536,7 +600,22 @@ export default function PageEditor() {
         onClose={() => setIconOpen(false)}
         onPick={applyIcon}
       />
-      <CommentsPanel pageId={pageId} opened={commentsOpen} onClose={() => setCommentsOpen(false)} />
+      <CommentsPanel
+        pageId={pageId}
+        opened={commentsOpen}
+        onClose={() => {
+          setCommentsOpen(false);
+          setPendingAnchor(null);
+          setActiveComment(editorRef.current, null);
+        }}
+        comments={comments}
+        onReload={loadComments}
+        pendingAnchor={pendingAnchor}
+        onClearPendingAnchor={() => setPendingAnchor(null)}
+        onPreviewComment={previewComment}
+        onEndPreview={endPreview}
+        isResolvable={isResolvable}
+      />
       <HistoryModal
         pageId={pageId}
         opened={historyOpen}
