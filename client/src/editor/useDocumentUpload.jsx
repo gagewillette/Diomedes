@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Group, Modal, Radio, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
-import { trackedUpload } from '../lib/uploadStore.js';
+import { fileTooLargeMessage, trackedUpload } from '../lib/uploadStore.js';
 import { docKindFor } from './nodes/DocumentBlock.jsx';
 
 /**
@@ -57,6 +57,13 @@ export function useDocumentUpload(pageId) {
       if (!pageId) return null;
       const kind = docKindFor(file);
       if (!kind) return null;
+      // Checked before the "store as…" prompt: there is no point asking how to
+      // keep a file the workspace will not accept.
+      const tooLarge = fileTooLargeMessage(file);
+      if (tooLarge) {
+        notifications.show({ color: 'yellow', message: tooLarge });
+        return null;
+      }
 
       let storeAs = 'original';
       if (kind === 'pptx') {

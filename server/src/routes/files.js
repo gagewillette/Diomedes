@@ -5,10 +5,10 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { q } from '../db.js';
-import { asyncRoute, httpError } from '../lib/util.js';
+import { asyncRoute, formatBytes, httpError } from '../lib/util.js';
 import { requireAuth, assertSpaceRole, spaceRole, getPage, resolveUser } from '../lib/auth.js';
 import { convertToPdf, pdfConversionAvailable } from '../lib/convert.js';
-import { uploadsEnabled, getWorkspace } from '../lib/workspace.js';
+import { uploadsEnabled, uploadMaxBytes, getWorkspace } from '../lib/workspace.js';
 import { PDF_MIME, docTypeFor, inlineAllowed } from '../lib/doctypes.js';
 import { STORAGE_PATH } from '../lib/storage.js';
 
@@ -18,13 +18,61 @@ export { STORAGE_PATH };
 // used by inline images and videos.
 export const userDir = (userId) => path.join('users', userId);
 
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, path.join(STORAGE_PATH, 'tmp')),
-    filename: (_req, _file, cb) => cb(null, crypto.randomUUID()),
-  }),
-  limits: { fileSize: 512 * 1024 * 1024 },
+const uploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, path.join(STORAGE_PATH, 'tmp')),
+  filename: (_req, _file, cb) => cb(null, crypto.randomUUID()),
 });
+
+// A multipart envelope costs a boundary, a couple of part headers and the
+// filename on top of the file itself. The Content-Length check below is a cheap
+// pre-filter, not the real limit, so it allows this much slack rather than
+// refusing a file that is exactly at the ceiling.
+const MULTIPART_OVERHEAD = 8 * 1024;
+
+/**
+ * Accepts one file, capped at the workspace's current limit.
+ *
+ * The cap is read per request rather than baked into a module-level multer, so
+ * lowering it in workspace settings takes effect on the next upload instead of
+ * the next restart.
+ *
+ * Two gates, and the order is the point. The first looks at the declared
+ * Content-Length and answers 413 before a single body byte is read, so a file
+ * that was never going to be accepted is not carried across the network and
+ * written to the storage volume first. The second is multer's own byte counter,
+ * which catches a lying or absent Content-Length and stops the stream mid-flight.
+ */
+const uploadSingle = (field) =>
+  asyncRoute(async (req, res, next) => {
+    const max = await uploadMaxBytes();
+    const tooBig = () =>
+      httpError(413, `That file is larger than this workspace allows (${formatBytes(max)} per file)`);
+
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > max + MULTIPART_OVERHEAD) {
+      // Nothing will read the rest of the body, so tell the client this
+      // connection is finished with — otherwise a browser can sit pushing bytes
+      // at a socket nobody is draining.
+      res.setHeader('Connection', 'close');
+      return next(tooBig());
+    }
+
+    multer({ storage: uploadStorage, limits: { fileSize: max, files: 1 } }).single(field)(
+      req,
+      res,
+      (err) => {
+        if (err) {
+          // multer has already deleted whatever partial file it wrote.
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            res.setHeader('Connection', 'close');
+            return next(tooBig());
+          }
+          return next(err);
+        }
+        next();
+      }
+    );
+  });
 
 // Converted PDFs come out of the OS temp dir, which in a container is often a
 // different filesystem from the storage volume — rename() answers EXDEV there.
@@ -62,7 +110,7 @@ router.post(
   '/pages/:id/attachments',
   requireAuth,
   requireUploadsEnabled,
-  upload.single('file'),
+  uploadSingle('file'),
   asyncRoute(async (req, res) => {
     if (!req.file) throw httpError(400, 'No file uploaded');
     const page = await getPage(req.params.id);
@@ -107,7 +155,7 @@ router.post(
   '/pages/:id/documents',
   requireAuth,
   requireUploadsEnabled,
-  upload.single('file'),
+  uploadSingle('file'),
   asyncRoute(async (req, res) => {
     if (!req.file) throw httpError(400, 'No file uploaded');
     const tmpPath = req.file.path;

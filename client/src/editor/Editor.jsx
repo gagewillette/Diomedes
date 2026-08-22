@@ -25,7 +25,7 @@ import { Markdown } from 'tiptap-markdown';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import { api } from '../lib/api.js';
-import { trackedUpload } from '../lib/uploadStore.js';
+import { fileTooLargeMessage, trackedUpload } from '../lib/uploadStore.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { FONT_STACKS } from '../lib/prefs.js';
 import SmoothCaret from './SmoothCaret.jsx';
@@ -213,6 +213,17 @@ function notifyUploadsOff() {
   });
 }
 
+/**
+ * Refuses an oversized file where it is picked, dropped or pasted — before any
+ * of it goes over the wire. Answers true when the file was refused.
+ */
+function notifyIfTooLarge(file) {
+  const message = fileTooLargeMessage(file);
+  if (!message) return false;
+  notifications.show({ color: 'yellow', message });
+  return true;
+}
+
 /** documentBlock attrs from a POST /pages/:id/documents response. */
 export const documentAttrs = (res) => ({
   attachmentId: res.attachment.id,
@@ -260,6 +271,7 @@ export default function Editor({
           notifyUploadsOff();
           return null;
         }
+        if (notifyIfTooLarge(file)) return null;
         try {
           const fd = new FormData();
           fd.append('file', file);
@@ -284,6 +296,7 @@ export default function Editor({
       notifyUploadsOff();
       return null;
     }
+    if (notifyIfTooLarge(file)) return null;
     return uploadDocumentRef.current?.(file) ?? null;
   }, []);
 

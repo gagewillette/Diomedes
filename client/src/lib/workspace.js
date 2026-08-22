@@ -15,11 +15,19 @@ export const DEFAULT_WORKSPACE = {
   // Highlighting on, linting on. Share pages use these defaults verbatim and
   // then turn linting off themselves — see CODE_INTELLIGENCE_READONLY below.
   codeIntelligence: { highlighting: true, linting: true, maxBytes: 100_000 },
+  // Largest single file the workspace accepts. Mirrors DEFAULT_UPLOADS on the
+  // server; the client checks it before opening a request so an oversized file
+  // is never put on the wire.
+  uploads: { maxBytes: 512_000_000 },
 };
 
 // Mirrors CODE_MAX_BYTES_MIN/MAX on the server, which clamps to the same range.
 export const CODE_MAX_BYTES_MIN = 10_000;
 export const CODE_MAX_BYTES_MAX = 1_000_000;
+
+// Mirrors UPLOAD_MAX_BYTES_MIN/MAX on the server, which clamps to the same range.
+export const UPLOAD_MAX_BYTES_MIN = 1_000_000;
+export const UPLOAD_MAX_BYTES_MAX = 512_000_000;
 
 // A public share page has no workspace context and nobody to fix a false
 // positive, so it colours code and checks nothing.
@@ -49,5 +57,11 @@ export const mergeWorkspace = (workspace) => ({
         && Number.isFinite(workspace.codeIntelligence.maxBytes)
         ? Math.min(CODE_MAX_BYTES_MAX, Math.max(CODE_MAX_BYTES_MIN, Math.round(workspace.codeIntelligence.maxBytes)))
         : DEFAULT_WORKSPACE.codeIntelligence.maxBytes,
+  },
+  uploads: {
+    maxBytes:
+      typeof workspace?.uploads?.maxBytes === 'number' && Number.isFinite(workspace.uploads.maxBytes)
+        ? Math.min(UPLOAD_MAX_BYTES_MAX, Math.max(UPLOAD_MAX_BYTES_MIN, Math.round(workspace.uploads.maxBytes)))
+        : DEFAULT_WORKSPACE.uploads.maxBytes,
   },
 });

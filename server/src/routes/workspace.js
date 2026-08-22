@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { asyncRoute, httpError } from '../lib/util.js';
 import { requireAuth, requireAdmin } from '../lib/auth.js';
 import {
-  getWorkspace, setCodeIntelligence, setDataSavings, setPerformance, setWorkspaceName,
+  getWorkspace, setCodeIntelligence, setDataSavings, setPerformance, setUploads, setWorkspaceName,
   WORKSPACE_NAME_MAX,
 } from '../lib/workspace.js';
 import { publish } from '../lib/events.js';
@@ -123,6 +123,34 @@ router.patch(
     const workspace = await setCodeIntelligence(patch);
     // Editors that are already open clear or rebuild their decorations off the
     // back of this event — no reload.
+    publish({ type: 'workspace-settings-changed', workspace });
+    res.json({ workspace });
+  })
+);
+
+// The upload ceiling. Same shape and same clamping as code-intelligence's
+// maxBytes; the event matters more here than elsewhere, because a browser that
+// has not heard about a lowered limit would let someone pick a file the server
+// is about to refuse.
+router.patch(
+  '/settings/uploads',
+  requireAuth,
+  requireAdmin,
+  asyncRoute(async (req, res) => {
+    const patch = req.body?.uploads;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw httpError(400, 'uploads must be an object');
+    }
+    const keys = Object.keys(patch);
+    const known = ['maxBytes'];
+    if (!keys.length || keys.some((k) => !known.includes(k))) {
+      throw httpError(400, `uploads accepts only: ${known.join(', ')}`);
+    }
+    if ('maxBytes' in patch && (typeof patch.maxBytes !== 'number' || !Number.isFinite(patch.maxBytes))) {
+      throw httpError(400, 'maxBytes must be a number');
+    }
+
+    const workspace = await setUploads(patch);
     publish({ type: 'workspace-settings-changed', workspace });
     res.json({ workspace });
   })
