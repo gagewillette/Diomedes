@@ -130,6 +130,22 @@ body.gd-block-drag-active {
   from { opacity: 0; transform: translateY(-3px) scale(0.98); }
   to { opacity: 1; transform: none; }
 }
+/* The "this window is paused" overlay. It arrives on top of a working app, so
+   it fades the veil in rather than slamming it down — the app dimming out is
+   the thing being communicated, and it should read as a dimmer, not a cut. The
+   card follows a touch slower and a touch behind, so the backdrop is already
+   settling as it lands. */
+.gd-inactive-overlay-anim { animation: gd-overlay-in 180ms ease both; }
+.gd-inactive-overlay-anim > * { animation: gd-overlay-card-in 220ms ease 40ms both; }
+@keyframes gd-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes gd-overlay-card-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
 .gd-anim-off *, .gd-anim-off *::before, .gd-anim-off *::after {
   transition-duration: 0s !important;
   animation-duration: 0s !important;
@@ -137,6 +153,9 @@ body.gd-block-drag-active {
 .gd-anim-off .gd-smooth-caret { animation: gd-caret-blink 1.1s steps(1) infinite !important; }
 @media (prefers-reduced-motion: reduce) {
   .gd-fade-in, .gd-slash-menu { animation: none; }
+  /* The overlay still has to appear — it is the only thing standing between
+     this window and an account someone else is using — it just appears. */
+  .gd-inactive-overlay-anim, .gd-inactive-overlay-anim > * { animation: none; }
   .gd-smooth-caret { transition: none; }
   .gd-space-card:hover { transform: none; }
   /* The rows still dim while they are being carried — that is information, not
