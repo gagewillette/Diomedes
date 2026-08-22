@@ -37,10 +37,12 @@ Errors are JSON: `{"error": "message"}` with proper status codes (401/403/404/40
 ### Workspace settings
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}, performance: {logging, sampleRate}}}` — any member |
+| GET | `/api/workspace/settings` | `{workspace: {name, dataSavings: {livePointers, fileUploads}, performance: {logging, sampleRate}, codeIntelligence: {highlighting, linting, maxBytes}, uploads: {maxBytes}}}` — any member |
 | PATCH | `/api/workspace/settings/name` | `{name}` — renames the workspace, admin/owner only. Trimmed, required, 64 characters max. Pushed to every browser over SSE |
 | PATCH | `/api/workspace/settings/data-savings` | `{dataSavings: {livePointers?, fileUploads?}}`, booleans, admin/owner only. Flags are positive: `false` turns the capability **off**. With `fileUploads: false` both upload endpoints answer 403; stored files keep being served |
 | PATCH | `/api/workspace/settings/performance` | `{performance: {logging?: bool, sampleRate?: 0..1}}`, admin/owner only. `logging: false` stops all sample collection, client and server |
+| PATCH | `/api/workspace/settings/code-intelligence` | `{codeIntelligence: {highlighting?: bool, linting?: bool, maxBytes?: number}}`, admin/owner only. `maxBytes` is clamped to 10,000–1,000,000 rather than rejected |
+| PATCH | `/api/workspace/settings/uploads` | `{uploads: {maxBytes: number}}`, admin/owner only — the largest single file the workspace accepts. Clamped to 1,000,000–512,000,000 (1 MB–512 MB, decimal); the default is 512 MB. Pushed to every browser over SSE, so a lowered limit takes effect without a reload |
 | GET | `/api/workspace/info` | Workspace inventory: content counts, 7-day activity, per-space breakdown, storage (attachments, disk, database, per-table) and runtime (node, uptime, memory, db pool, search mode). Admin/owner only |
 
 ### Performance logging
@@ -189,7 +191,7 @@ document, no new version, and no re-embedding.
 ### Files
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}`. 403 when workspace file uploads are off |
+| POST | `/api/pages/:id/attachments` | multipart field `file` → `{url}`. 403 when workspace file uploads are off. 413 when the file is over `uploads.maxBytes` — answered from the declared `Content-Length` before the body is read, and again from the bytes actually arriving |
 | GET | `/api/files/:id/:filename` | Auth or public-if-page-shared |
 
 ## MCP server sketch

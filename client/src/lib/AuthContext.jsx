@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { startRealtime } from './realtime.js';
 import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
 import { mergeWorkspace, DEFAULT_WORKSPACE, CODE_INTELLIGENCE_READONLY } from './workspace.js';
+import { setMaxFileBytes } from './uploadStore.js';
 import { startPerfCollector, stopPerfCollector } from './perf.js';
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -109,6 +110,13 @@ export function AuthProvider({ children }) {
     return () => stopPerfCollector({ drain: true });
   }, [state.user?.id, perfLogging, perfSampleRate]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The upload store is plain module state — editor code reaches it from
+  // outside React — so the workspace ceiling is pushed into it here. Same event
+  // that updates this state updates it in every other open tab, so lowering the
+  // limit starts refusing big files without a reload.
+  const maxFileBytes = state.workspace.uploads.maxBytes;
+  useEffect(() => setMaxFileBytes(maxFileBytes), [maxFileBytes]);
+
   const logout = useCallback(async () => {
     await api.post('/api/auth/logout');
     location.assign('/login');
@@ -163,6 +171,13 @@ export function AuthProvider({ children }) {
     return data.workspace;
   }, []);
 
+  // Admin-only, same pattern as the groups above.
+  const updateUploads = useCallback(async (partial) => {
+    const data = await api.patch('/api/workspace/settings/uploads', { uploads: partial });
+    setState((s) => ({ ...s, workspace: mergeWorkspace(data.workspace) }));
+    return data.workspace;
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -178,6 +193,8 @@ export function AuthProvider({ children }) {
         updatePerformance,
         codeIntelligence: state.workspace.codeIntelligence,
         updateCodeIntelligence,
+        uploads: state.workspace.uploads,
+        updateUploads,
         updateWorkspaceName,
       }}
     >
@@ -197,4 +214,5 @@ export const useAuth = () =>
     // Outside a provider means a public share page: colour the code, check
     // nothing.
     codeIntelligence: CODE_INTELLIGENCE_READONLY,
+    uploads: DEFAULT_WORKSPACE.uploads,
   };

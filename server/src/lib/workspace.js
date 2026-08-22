@@ -31,6 +31,30 @@ export const DEFAULT_DATA_SAVINGS = {
   fileUploads: true,
 };
 
+// Upload limits. `maxBytes` is the largest single file the workspace accepts,
+// checked twice: once against the declared Content-Length before a body byte is
+// read, and once by multer against the bytes actually arriving. The default is
+// the ceiling, which restates the figure that used to be hard-coded in the
+// upload route — so an existing install keeps accepting what it always did.
+//
+// Bytes are decimal throughout (1 MB = 1,000,000), matching how both the server
+// message and the admin UI format them: an admin who sets 250 MB should not be
+// told the limit is 262.1 MB.
+export const DEFAULT_UPLOADS = {
+  maxBytes: 512_000_000,
+};
+
+// The floor keeps the setting usable (a workspace that cannot take a 1 MB image
+// has effectively turned uploads off, and there is a switch for that) and the
+// ceiling bounds what a single request can write into the storage volume.
+export const UPLOAD_MAX_BYTES_MIN = 1_000_000;
+export const UPLOAD_MAX_BYTES_MAX = 512_000_000;
+
+const normalizeUploadMaxBytes = (bytes) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return DEFAULT_UPLOADS.maxBytes;
+  return Math.min(UPLOAD_MAX_BYTES_MAX, Math.max(UPLOAD_MAX_BYTES_MIN, Math.round(bytes)));
+};
+
 // Code intelligence is a *compute* switch, not a bandwidth one: everything it
 // governs happens in the reader's browser. It sits beside data savings because
 // the trade-off is the same shape — an admin trading a nicety for a cheaper
@@ -77,6 +101,9 @@ export const normalizeWorkspace = (value) => ({
     linting: value?.codeIntelligence?.linting !== false,
     maxBytes: normalizeMaxBytes(value?.codeIntelligence?.maxBytes),
   },
+  uploads: {
+    maxBytes: normalizeUploadMaxBytes(value?.uploads?.maxBytes),
+  },
 });
 
 export async function getWorkspace() {
@@ -93,6 +120,10 @@ export const getPerformance = async () => (await getWorkspace()).performance;
 export const perfLoggingEnabled = async () => (await getPerformance()).logging;
 
 export const getCodeIntelligence = async () => (await getWorkspace()).codeIntelligence;
+
+export const getUploads = async () => (await getWorkspace()).uploads;
+
+export const uploadMaxBytes = async () => (await getUploads()).maxBytes;
 
 /**
  * Merge a partial data-savings patch into the stored blob, leaving the workspace
@@ -168,6 +199,28 @@ export async function setCodeIntelligence(patch) {
       ...(typeof patch?.highlighting === 'boolean' ? { highlighting: patch.highlighting } : {}),
       ...(typeof patch?.linting === 'boolean' ? { linting: patch.linting } : {}),
       ...(typeof patch?.maxBytes === 'number' ? { maxBytes: normalizeMaxBytes(patch.maxBytes) } : {}),
+    },
+  };
+  await q(
+    `INSERT INTO settings (key, value) VALUES ('workspace', $1)
+     ON CONFLICT (key) DO UPDATE SET value = $1`,
+    [next]
+  );
+  return next;
+}
+
+/**
+ * Same merge-and-store again, for the upload group. maxBytes is clamped rather
+ * than rejected, like the code-block ceiling: an admin who types a huge number
+ * gets the maximum, not an error about bounds.
+ */
+export async function setUploads(patch) {
+  const current = await getWorkspace();
+  const next = {
+    ...current,
+    uploads: {
+      ...current.uploads,
+      ...(typeof patch?.maxBytes === 'number' ? { maxBytes: normalizeUploadMaxBytes(patch.maxBytes) } : {}),
     },
   };
   await q(

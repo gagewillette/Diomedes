@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react';
 import {
   Container, Title, Paper, Stack, Text, Switch, Group, Alert, Badge, Slider, Anchor,
-  TextInput, Button,
+  TextInput, NumberInput, Button,
 } from '@mantine/core';
 import { IconInfoCircle, IconPointer, IconUpload, IconGauge, IconCode, IconAlertTriangle } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { WORKSPACE_NAME_MAX, CODE_MAX_BYTES_MIN, CODE_MAX_BYTES_MAX } from '../lib/workspace.js';
+import {
+  WORKSPACE_NAME_MAX, CODE_MAX_BYTES_MIN, CODE_MAX_BYTES_MAX,
+  UPLOAD_MAX_BYTES_MIN, UPLOAD_MAX_BYTES_MAX,
+} from '../lib/workspace.js';
 import { formatBytes } from '../lib/format.js';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
+
+// The stored figure is bytes; the input is megabytes. Decimal MB, the same unit
+// formatBytes prints, so the number typed and the number shown back agree.
+const MB = 1_000_000;
+const bytesToMb = (bytes) => Math.round(bytes / MB);
 
 /**
  * Workspace-wide settings. Unlike /settings (which is per-account), everything
@@ -18,7 +26,8 @@ import { useDocumentIdentity } from '../lib/documentTitle.js';
 export default function WorkspaceSettings() {
   const {
     workspaceName, dataSavings, updateDataSavings, performanceSettings, updatePerformance,
-    codeIntelligence, updateCodeIntelligence, updateWorkspaceName, isAdmin,
+    codeIntelligence, updateCodeIntelligence, uploads, updateUploads,
+    updateWorkspaceName, isAdmin,
   } = useAuth();
   useDocumentIdentity(`${workspaceName} settings`, '⚙️');
   const [saving, setSaving] = useState(null);
@@ -33,6 +42,10 @@ export default function WorkspaceSettings() {
   // after this screen has already mounted.
   const [name, setName] = useState(workspaceName);
   useEffect(() => setName(workspaceName), [workspaceName]);
+  // Edited in megabytes — nobody wants to type 52428800 — and written on Save
+  // rather than on every keystroke.
+  const [maxFileMb, setMaxFileMb] = useState(bytesToMb(uploads.maxBytes));
+  useEffect(() => setMaxFileMb(bytesToMb(uploads.maxBytes)), [uploads.maxBytes]);
 
   const save = async (key, run) => {
     setSaving(key);
@@ -47,6 +60,14 @@ export default function WorkspaceSettings() {
   };
 
   const toggle = (key, enabled) => save(key, () => updateDataSavings({ [key]: enabled }));
+
+  const saveMaxFile = () => {
+    const mb = Number(maxFileMb);
+    if (!Number.isFinite(mb) || mb <= 0) return;
+    const bytes = Math.round(mb * MB);
+    if (bytes === uploads.maxBytes) return;
+    save('maxBytes-upload', () => updateUploads({ maxBytes: bytes }));
+  };
 
   const saveName = () => {
     const trimmed = name.trim();
@@ -134,6 +155,48 @@ export default function WorkspaceSettings() {
             disabled={!isAdmin || saving === 'fileUploads'}
             onChange={(e) => toggle('fileUploads', !e.currentTarget.checked)}
           />
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" mt="md">
+        <Stack>
+          <div>
+            <Group gap={6}>
+              <Text fw={700} size="sm">Uploads</Text>
+              <Badge size="xs" variant="light" color={dataSavings.fileUploads ? 'green' : 'gray'}>
+                {dataSavings.fileUploads ? formatBytes(uploads.maxBytes) : 'Off'}
+              </Badge>
+            </Group>
+            <Text size="xs" c="dimmed">
+              The largest single file anyone can upload — images, videos, attachments and
+              documents alike. Files already stored are never affected by a change here.
+            </Text>
+          </div>
+
+          <NumberInput
+            label="Maximum file size"
+            description={`Between ${bytesToMb(UPLOAD_MAX_BYTES_MIN)} MB and ${bytesToMb(UPLOAD_MAX_BYTES_MAX)} MB. Oversized files are refused in the browser, so nothing is uploaded and then thrown away.`}
+            suffix=" MB"
+            min={bytesToMb(UPLOAD_MAX_BYTES_MIN)}
+            max={bytesToMb(UPLOAD_MAX_BYTES_MAX)}
+            step={5}
+            clampBehavior="strict"
+            allowDecimal={false}
+            allowNegative={false}
+            value={maxFileMb}
+            disabled={!isAdmin || saving === 'maxBytes-upload'}
+            onChange={setMaxFileMb}
+            onKeyDown={(e) => e.key === 'Enter' && saveMaxFile()}
+          />
+          <Group justify="flex-end">
+            <Button
+              onClick={saveMaxFile}
+              loading={saving === 'maxBytes-upload'}
+              disabled={!isAdmin || Math.round(Number(maxFileMb) * MB) === uploads.maxBytes}
+            >
+              Save limit
+            </Button>
+          </Group>
         </Stack>
       </Paper>
 
