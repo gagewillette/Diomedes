@@ -6,8 +6,6 @@ import { mergePrefs, DEFAULT_PREFS } from './prefs.js';
 import { mergeWorkspace, DEFAULT_WORKSPACE, CODE_INTELLIGENCE_READONLY } from './workspace.js';
 import { setMaxFileBytes } from './uploadStore.js';
 import { startPerfCollector, stopPerfCollector } from './perf.js';
-import { useActiveWindow } from './useActiveWindow.js';
-import { windowId } from './activeWindow.js';
 
 const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 
@@ -38,11 +36,6 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  // One window per account: this owns the claim and tells the app whether to
-  // render normally or hand over to the takeover overlay.
-  const activeWindow = useActiveWindow(state.user?.id);
-  const onActiveWindowEvent = activeWindow.onServerEvent;
 
   // Live updates: when an admin changes this user's workspace role or their
   // membership in a space, push it straight into the UI instead of waiting for
@@ -90,11 +83,6 @@ export function AuthProvider({ children }) {
             workspaceName: detail.workspace?.name || s.workspaceName,
           }));
           break;
-        case 'active-window-changed':
-          // Somebody claimed the account. The payload names the winning window,
-          // so this tab can tell straight away whether it is still the one.
-          onActiveWindowEvent(detail);
-          break;
         case 'reconnected':
           // Anything pushed while the stream was down was missed; re-sync.
           refresh();
@@ -102,14 +90,12 @@ export function AuthProvider({ children }) {
           emit('users-changed', {});
           emit('space-members-changed', {});
           emit('pages-changed', {});
-          // The claim may have moved while the stream was down.
-          onActiveWindowEvent({});
           break;
         default:
           break;
       }
     });
-  }, [state.user?.id, refresh, onActiveWindowEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.user?.id, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The collector follows the workspace switch, in this tab and in every other
   // one: an admin turning logging off stops browsers that are already open,
@@ -132,7 +118,7 @@ export function AuthProvider({ children }) {
   useEffect(() => setMaxFileBytes(maxFileBytes), [maxFileBytes]);
 
   const logout = useCallback(async () => {
-    await api.post('/api/auth/logout', { clientId: windowId() });
+    await api.post('/api/auth/logout');
     location.assign('/login');
   }, []);
 
@@ -210,7 +196,6 @@ export function AuthProvider({ children }) {
         uploads: state.workspace.uploads,
         updateUploads,
         updateWorkspaceName,
-        activeWindow,
       }}
     >
       {children}
@@ -230,6 +215,4 @@ export const useAuth = () =>
     // nothing.
     codeIntelligence: CODE_INTELLIGENCE_READONLY,
     uploads: DEFAULT_WORKSPACE.uploads,
-    // No account outside the provider, so nothing to hold a claim on.
-    activeWindow: { status: 'active', holder: null, switching: false, takeOver: () => {} },
   };

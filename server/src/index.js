@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import { migrate } from './db.js';
 import { initSearch, searchHealth } from './search/index.js';
 import { initEvents } from './lib/events.js';
-import { initSessionLock } from './lib/sessionLock.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import spaceRoutes from './routes/spaces.js';
@@ -19,7 +18,6 @@ import tokenRoutes from './routes/tokens.js';
 import workspaceRoutes from './routes/workspace.js';
 import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
-import activeWindowRoutes from './routes/activeWindow.js';
 import perfRoutes from './routes/perf.js';
 import { perfMiddleware, initPerf, prune } from './lib/perf.js';
 import { compressionMiddleware } from './lib/compress.js';
@@ -39,8 +37,6 @@ async function main() {
 
   initSearch(redis);
   initEvents(redis);
-  // Holds the "one active window per account" claim; same redis, short TTLs.
-  initSessionLock(redis);
   // The recorder buffers in memory and flushes on a timer; it asks the
   // workspace switch at flush time, so turning logging off stops writes
   // without needing to tear the middleware out of the stack.
@@ -84,7 +80,6 @@ async function main() {
   app.use('/api/spaces', spaceRoutes);
   app.use('/api/tokens', tokenRoutes);
   app.use('/api/events', eventRoutes);
-  app.use('/api/active-window', activeWindowRoutes);
   app.use('/api/workspace', workspaceRoutes);
   app.use('/api/perf', perfRoutes);
   // fileRoutes first: it contains the unauthenticated /public and /files routes,
