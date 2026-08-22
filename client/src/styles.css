@@ -1107,6 +1107,87 @@ body.gd-block-drag-active {
   .gd-section-landed { animation-duration: 0.01ms; }
 }
 
+/* ---- anchored comments ---- */
+
+/* Commented text, at rest. Quiet enough to read through — a page with twenty
+   comments on it is still a page someone has to read — but unmistakably marked.
+   A bottom border rather than a background: highlights stack visibly when two
+   comments overlap the same words, where two translucent backgrounds would just
+   read as one darker one. */
+.gd-comment-mark {
+  border-bottom: 2px solid var(--mantine-color-yellow-5);
+  background: color-mix(in srgb, var(--mantine-color-yellow-2) 45%, transparent);
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+[data-mantine-color-scheme='dark'] .gd-comment-mark {
+  border-bottom-color: var(--mantine-color-yellow-7);
+  background: color-mix(in srgb, var(--mantine-color-yellow-9) 35%, transparent);
+}
+.gd-comment-mark:hover {
+  background: color-mix(in srgb, var(--mantine-color-yellow-3) 60%, transparent);
+}
+
+/* Found by its words but not in the block it was taken from — the comment is
+   almost certainly still about this text, so it is drawn, but dashed rather
+   than solid so it does not claim more certainty than it has. */
+.gd-comment-mark[data-comment-approximate='true'] {
+  border-bottom-style: dashed;
+}
+
+/* The one being hovered in the sidebar. A different colour rather than a
+   stronger yellow, so it stands out even on a page where every other sentence
+   is already highlighted. */
+.gd-comment-mark--active {
+  background: color-mix(in srgb, var(--mantine-color-blue-2) 70%, transparent);
+  border-bottom-color: var(--mantine-color-blue-6);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mantine-color-blue-3) 60%, transparent);
+}
+[data-mantine-color-scheme='dark'] .gd-comment-mark--active {
+  background: color-mix(in srgb, var(--mantine-color-blue-9) 55%, transparent);
+  border-bottom-color: var(--mantine-color-blue-4);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mantine-color-blue-8) 60%, transparent);
+}
+
+/* The quoted phrase above a comment. Italic and rule-marked so it reads as the
+   document's words rather than the commenter's. */
+.gd-comment-quote {
+  font-style: italic;
+  border-left: 2px solid var(--mantine-color-yellow-5);
+  padding-left: 6px;
+}
+[data-mantine-color-scheme='dark'] .gd-comment-quote { border-left-color: var(--mantine-color-yellow-7); }
+.gd-comment-quote.is-orphaned {
+  border-left-color: var(--mantine-color-gray-5);
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+/* A card you can hover to find its text says so by responding to the pointer. */
+.gd-comment-card.is-anchored { cursor: pointer; }
+.gd-comment-card.is-anchored:hover,
+.gd-comment-card.is-anchored:focus-visible {
+  border-color: var(--mantine-color-blue-5);
+}
+.gd-comment-card.is-anchored:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-5);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gd-comment-mark { transition: none; }
+}
+
+/* The highlights are an editing aid, not part of the document. */
+@media print {
+  .gd-comment-mark {
+    border-bottom: none;
+    background: none;
+    box-shadow: none;
+  }
+}
+
 @media print {
   .gd-findbar { display: none; }
 }

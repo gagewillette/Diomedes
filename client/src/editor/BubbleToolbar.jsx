@@ -4,6 +4,7 @@ import {
   IconBold, IconItalic, IconUnderline, IconStrikethrough, IconCode, IconLink,
   IconHighlight, IconLetterCase, IconAlignLeft, IconAlignCenter, IconAlignRight,
   IconChevronDown, IconClearFormatting, IconSuperscript, IconSubscript, IconPalette,
+  IconMessagePlus,
 } from '@tabler/icons-react';
 
 const COLORS = ['#e03131', '#e8590c', '#f08c00', '#2f9e44', '#1971c2', '#9c36b5', '#495057'];
@@ -17,8 +18,27 @@ function Btn({ active, onClick, title, children }) {
   );
 }
 
-export default function BubbleToolbar({ editor, onEditLink }) {
+export default function BubbleToolbar({ editor, onEditLink, onComment }) {
   if (!editor) return null;
+
+  // Commenting is the one thing a reader can do to a page they cannot edit, so
+  // when the document is read-only the bar shrinks to exactly that. Showing the
+  // formatting buttons greyed out would be offering a reader a pen that does
+  // not write; showing nothing would take away the feature they *do* have.
+  const readOnly = !editor.isEditable;
+
+  const commentButton = onComment ? (
+    <ActionIcon
+      variant="subtle"
+      color="gray"
+      size="md"
+      onClick={onComment}
+      title="Comment on this text"
+      aria-label="Comment on this text"
+    >
+      <IconMessagePlus size={16} />
+    </ActionIcon>
+  ) : null;
 
   const blockLabel = editor.isActive('heading', { level: 1 }) ? 'Heading 1'
     : editor.isActive('heading', { level: 2 }) ? 'Heading 2'
@@ -34,7 +54,8 @@ export default function BubbleToolbar({ editor, onEditLink }) {
       tippyOptions={{ duration: 100, maxWidth: 'none' }}
       shouldShow={({ editor: e, state }) => {
         if (state.selection.empty) return false;
-        if (!e.isEditable) return false;
+        // A reader gets the bar only because there is something on it for them.
+        if (!e.isEditable && !onComment) return false;
         for (const name of ['codeBlock', 'image', 'mermaidDiagram', 'excalidraw', 'iframeEmbed', 'videoBlock']) {
           if (e.isActive(name)) return false;
         }
@@ -42,6 +63,9 @@ export default function BubbleToolbar({ editor, onEditLink }) {
       }}
     >
       <Paper shadow="md" p={4} withBorder>
+        {readOnly ? (
+          <Group gap={2} wrap="nowrap">{commentButton}</Group>
+        ) : (
         <Group gap={2} wrap="nowrap">
           <Menu withinPortal position="bottom-start">
             <Menu.Target>
@@ -107,7 +131,10 @@ export default function BubbleToolbar({ editor, onEditLink }) {
           <Btn active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()} title="Align center"><IconAlignCenter size={16} /></Btn>
           <Btn active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()} title="Align right"><IconAlignRight size={16} /></Btn>
           <Btn onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} title="Clear formatting"><IconLetterCase size={16} /></Btn>
+          {commentButton && <Divider orientation="vertical" />}
+          {commentButton}
         </Group>
+        )}
       </Paper>
     </BubbleMenu>
   );

@@ -49,6 +49,8 @@ import { BlockId } from './blockId.js';
 import { TrailingNode } from './trailingNode.js';
 import { BlockDrag } from './blockDrag.js';
 import { SectionRef } from './SectionRef.js';
+import { CommentHighlight, setComments } from './CommentHighlight.js';
+import { buildAnchor } from '../lib/commentAnchor.js';
 import { HeadingLink } from './HeadingLink.jsx';
 import { DocumentBlock, docKindFor } from './nodes/DocumentBlock.jsx';
 import { useDocumentUpload } from './useDocumentUpload.jsx';
@@ -76,6 +78,11 @@ const FootnoteDocument = Document.extend({ content: 'block+ footnotes?' });
 // Module-level cache so mention suggestions work without prop-drilling.
 let userCache = [];
 
+// One shared empty list. `comments || []` inline would hand the plugin a fresh
+// array on every render, and the plugin compares by identity to decide whether
+// it has to resolve every anchor again.
+const NO_COMMENTS = [];
+
 // Placeholder walks top-level nodes only, so with the caret down in a footnote
 // the node it decorates is the whole apparatus — which counts as empty while
 // the note has no text yet. The hint is drawn at that container's top-left
@@ -87,7 +94,7 @@ const NO_PLACEHOLDER = new Set([FOOTNOTES, FOOTNOTE]);
 // session and the workspace switch has to take effect without a reload.
 const codeSettings = { highlighting: true, linting: false, maxBytes: 100_000 };
 
-export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false, codeIntelligence = codeSettings }) {
+export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Type '/' for commands…", collab, me, vim = false, drag = false, codeIntelligence = codeSettings, onActivateComment = null, onCommentsResolved = null }) {
   return [
     // First in the list, and at a higher priority than everything else: in
     // normal mode the keys must not reach the ordinary editing keymap.
@@ -172,6 +179,10 @@ export function buildExtensions({ uploadFile, uploadDocument, placeholder = "Typ
     // for readers and the public share view exactly as it does for an author.
     SectionRef,
     HeadingLink,
+    // Anchored comments, painted the same way §-references are: decorations
+    // over untouched text. Registered unconditionally — a reader sees the
+    // highlights on a page they cannot edit, and can add one of their own.
+    CommentHighlight.configure({ onActivate: onActivateComment, onResolved: onCommentsResolved }),
     // Stamps a stable id on every block. Position in this list does not matter:
     // global attributes are applied to the types they name once the whole
     // extension set is resolved, so DocumentBlock below is covered too.
@@ -244,9 +255,20 @@ export default function Editor({
   collab = null,
   me = null,
   onSaveState,
+  comments = null,
+  onAddComment,
+  onActivateComment,
+  onCommentsResolved,
 }) {
   const { preferences, dataSavings, codeIntelligence } = useAuth();
   const wrapRef = useRef(null);
+  // The extension list is built once per session (see the memo below), so the
+  // comment callback is reached through a ref rather than baked into the plugin
+  // at first render — otherwise opening the panel would need a new editor.
+  const activateCommentRef = useRef(onActivateComment);
+  activateCommentRef.current = onActivateComment;
+  const commentsResolvedRef = useRef(onCommentsResolved);
+  commentsResolvedRef.current = onCommentsResolved;
   // Modal editing is for people writing the page; a reader gets the plain view.
   const vimEnabled = editable && preferences.keymap === 'vim';
   // Workspace data savings: with uploads off, no new file gets in — no slash
@@ -324,6 +346,8 @@ export default function Editor({
         me,
         vim: vimEnabled,
         drag: Boolean(editable),
+        onActivateComment: (id) => activateCommentRef.current?.(id),
+        onCommentsResolved: (ids) => commentsResolvedRef.current?.(ids),
       }),
     // ydoc/provider identity, not the session object: the session re-wraps on
     // every connection-status change and rebuilding the list would be pointless.
@@ -362,6 +386,12 @@ export default function Editor({
   useEffect(() => {
     if (editor && editor.isEditable !== editable) editor.setEditable(editable);
   }, [editable, editor]);
+
+  // The highlight plugin owns the comment list; React's only job is to tell it
+  // when that list has changed.
+  useEffect(() => {
+    if (editor) setComments(editor, comments || NO_COMMENTS);
+  }, [editor, comments]);
 
   // `workspace-settings-changed` already fans out over SSE and lands in
   // AuthContext, so this effect is the last hop: turning checking off clears
@@ -437,6 +467,18 @@ export default function Editor({
     return end;
   }
 
+  // "Comment on this" from the selection toolbar. The anchor is built here,
+  // against the live document, and handed up — the panel above never sees a
+  // ProseMirror position, only the quote and the block it came from.
+  const addComment = useCallback(() => {
+    if (!editor || !onAddComment) return;
+    const { from, to } = editor.state.selection;
+    const anchor = buildAnchor(editor.state.doc, from, to);
+    // Nothing selected but whitespace or an image: there is no phrase to point
+    // at, so this is a page-level comment and the panel opens as one.
+    onAddComment(anchor);
+  }, [editor, onAddComment]);
+
   const { open: openLinkDialog, element: linkDialog } = useLinkDialog(editor);
   // Readers get the card too: knowing where a link goes before following it
   // is not an author's privilege.
@@ -482,7 +524,16 @@ export default function Editor({
         '--gd-line-height': preferences.lineHeight,
       }}
     >
-      {editable && <BubbleToolbar editor={editor} onEditLink={openLinkDialog} />}
+      {/* A reader gets the bar too, carrying the comment button and nothing
+          else — commenting is the one thing they can do to a page they cannot
+          edit. See BubbleToolbar's read-only branch. */}
+      {(editable || onAddComment) && (
+        <BubbleToolbar
+          editor={editor}
+          onEditLink={openLinkDialog}
+          onComment={onAddComment ? addComment : null}
+        />
+      )}
       {smoothCaret && <SmoothCaret editor={editor} />}
       <EditorContent editor={editor} />
       {collab && livePointers && <PointerLayer peers={peers} />}
