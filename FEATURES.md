@@ -62,6 +62,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Docmost capability | Diomedes |
 |---|---|
 | Workspaces | ✅ Single workspace (this is a personal server) |
+| Move content between workspaces | ✅ Cross-workspace space transfer. A space admin picks pages out of the tree (a page, a page and everything under it, or a handful of children) and mints an **import code**; an admin of any other Diomedes workspace pastes it under **Spaces → + → Import space** and gets the tree as a new space. Unticked parents of ticked pages travel as title-only placeholders so the hierarchy survives. Keys are per space, named, optionally expiring, revocable, and show when they were last redeemed; the code is shown once and only its hash is stored |
 | Spaces (team/topic separation) | ✅ Spaces with icon, description, slug |
 | Nested page tree with reordering | ✅ Nesting to any depth (capped at 20 levels), drag-and-drop reordering and reparenting (including between spaces), move up/down/indent/outdent + move-to-space |
 | Multi-select in the page tree | ✅ ⌘/Ctrl-click to pick pages out, Shift-click for a range. A selection drags as one pile and keeps its order on the drop; trashing one asks first |

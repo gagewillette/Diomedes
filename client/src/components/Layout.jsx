@@ -7,7 +7,7 @@ import { useDisclosure, useHotkeys } from '@mantine/hooks';
 import {
   IconSearch, IconHome, IconPlus, IconSun, IconMoon, IconLogout, IconSettings,
   IconUsers, IconChevronDown, IconChevronRight, IconLayoutSidebarLeftCollapse, IconBuilding,
-  IconGauge,
+  IconGauge, IconFolderPlus, IconDownload,
 } from '@tabler/icons-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -17,6 +17,7 @@ import { startRoute, settleRoute } from '../lib/perf.js';
 import { focusEditor, focusFileTree } from '../lib/vimFocus.js';
 import PageTree from './PageTree.jsx';
 import SearchModal from './SearchModal.jsx';
+import ImportSpaceModal from './ImportSpaceModal.jsx';
 import Emoji from './Emoji.jsx';
 
 const NAV_WIDTH_KEY = 'gd-nav-width';
@@ -38,6 +39,7 @@ export default function Layout({ children }) {
   const [openSpaces, setOpenSpaces] = useState(() => new Set());
   const [searchOpen, searchHandlers] = useDisclosure(false);
   const [newSpaceOpen, newSpaceHandlers] = useDisclosure(false);
+  const [importOpen, importHandlers] = useDisclosure(false);
   const [navOpen, navHandlers] = useDisclosure(true);
   const [newSpace, setNewSpace] = useState({ name: '', icon: '📚', description: '' });
   const [navWidth, setNavWidth] = useState(readStoredNavWidth);
@@ -208,11 +210,21 @@ export default function Layout({ children }) {
         <Group justify="space-between" px={4}>
           <Text size="xs" fw={700} c="dimmed" tt="uppercase">Spaces</Text>
           {isAdmin && (
-            <Tooltip label="New space">
-              <ActionIcon size="xs" variant="subtle" color="gray" onClick={newSpaceHandlers.open}>
-                <IconPlus size={13} />
-              </ActionIcon>
-            </Tooltip>
+            <Menu withinPortal position="bottom-end" shadow="md">
+              <Menu.Target>
+                <ActionIcon size="xs" variant="subtle" color="gray" aria-label="Add a space">
+                  <IconPlus size={13} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<IconFolderPlus size={14} />} onClick={newSpaceHandlers.open}>
+                  New space
+                </Menu.Item>
+                <Menu.Item leftSection={<IconDownload size={14} />} onClick={importHandlers.open}>
+                  Import space
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           )}
         </Group>
         <AppShell.Section grow component={ScrollArea} type="never" mt={4}>
@@ -275,6 +287,7 @@ export default function Layout({ children }) {
       </AppShell.Main>
 
       <SearchModal opened={searchOpen} onClose={searchHandlers.close} />
+      <ImportSpaceModal opened={importOpen} onClose={importHandlers.close} />
 
       <Modal opened={newSpaceOpen} onClose={newSpaceHandlers.close} title="Create space">
         <Stack>

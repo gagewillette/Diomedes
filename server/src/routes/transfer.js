@@ -11,7 +11,6 @@
 // content by id, so it is deliberately narrow: it reads the frozen selection on
 // the key and nothing else, and it can never be talked into widening it.
 import { Router } from 'express';
-import { q } from '../db.js';
 import { asyncRoute } from '../lib/util.js';
 import { requireAuth, requireAdmin, assertSpaceRole } from '../lib/auth.js';
 import { publish, adminAudience } from '../lib/events.js';
@@ -25,7 +24,6 @@ import {
   revokeExportKey,
 } from '../lib/spaceExport.js';
 import { fetchSnapshot, importSnapshot } from '../lib/spaceImport.js';
-import { expandSelection, summarizeSelection } from '../lib/spaceTransfer.js';
 
 const router = Router();
 
@@ -50,8 +48,11 @@ router.get(
 );
 
 // ---- everything below needs a session here ----
-
-router.use(requireAuth);
+//
+// requireAuth is attached per route rather than with router.use(). This router
+// is mounted on /api as a whole, so a blanket router.use() would run on every
+// request that enters /api — including the unauthenticated /api/public/:token
+// share routes mounted after it, which would start answering 401 to guests.
 
 /**
  * Export keys are space-admin-only. A writer can already read every page in the
@@ -63,36 +64,16 @@ const requireSpaceAdmin = (req) => assertSpaceRole(req.user, req.params.id, 'adm
 
 router.get(
   '/spaces/:id/export-keys',
+  requireAuth,
   asyncRoute(async (req, res) => {
     await requireSpaceAdmin(req);
     res.json({ keys: await listExportKeys(req.params.id) });
   })
 );
 
-/**
- * Preview what a selection would actually carry, without minting anything.
- *
- * This exists so the modal can show "9 pages, 2 kept for structure" using the
- * server's own expansion rather than a second implementation in the browser
- * that could drift from it. What the user is shown before pressing the button
- * is then the same computation that decides what the key contains.
- */
-router.post(
-  '/spaces/:id/export-keys/preview',
-  asyncRoute(async (req, res) => {
-    await requireSpaceAdmin(req);
-    const pageIds = Array.isArray(req.body?.pageIds) ? req.body.pageIds : [];
-    const { rows } = await q(
-      `SELECT id, parent_id, order_key FROM pages WHERE space_id = $1 AND deleted_at IS NULL`,
-      [req.params.id]
-    );
-    const selection = expandSelection(rows, pageIds);
-    res.json({ selection, summary: summarizeSelection(selection) });
-  })
-);
-
 router.post(
   '/spaces/:id/export-keys',
+  requireAuth,
   asyncRoute(async (req, res) => {
     await requireSpaceAdmin(req);
     const result = await createExportKey({
@@ -110,6 +91,7 @@ router.post(
 
 router.delete(
   '/spaces/:id/export-keys/:keyId',
+  requireAuth,
   asyncRoute(async (req, res) => {
     await requireSpaceAdmin(req);
     await revokeExportKey(req.params.id, req.params.keyId);
@@ -129,6 +111,7 @@ router.delete(
  */
 router.post(
   '/spaces/import/preview',
+  requireAuth,
   requireAdmin,
   asyncRoute(async (req, res) => {
     const snapshot = await fetchSnapshot(req.body?.code);
@@ -162,6 +145,7 @@ router.post(
  */
 router.post(
   '/spaces/import',
+  requireAuth,
   requireAdmin,
   asyncRoute(async (req, res) => {
     const snapshot = await fetchSnapshot(req.body?.code);
