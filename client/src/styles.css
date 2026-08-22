@@ -1379,3 +1379,53 @@ body.gd-block-drag-active {
 .gd-crumb-more:hover {
   background: var(--mantine-color-default-hover);
 }
+
+/* ---------- cross-workspace space transfer ---------- */
+/* Two panels of one surface, slid between rather than swapped. The strip is
+   twice the viewport and moves by half, so each panel is exactly the modal's
+   width whatever that turns out to be. */
+.gd-slider-viewport { overflow: hidden; }
+.gd-slider-strip {
+  display: flex;
+  width: 200%;
+  /* Panels size themselves; without this the shorter one is stretched to the
+     taller one's height and the viewport never shrinks back. */
+  align-items: flex-start;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.gd-slider-strip.is-instant { transition: none; }
+.gd-slider-panel {
+  flex: 0 0 50%;
+  width: 50%;
+  /* A focus ring or a Mantine dropdown on the visible panel must not be
+     clipped, but the strip has to be able to hide the other panel — so the
+     padding gives the ring somewhere to live inside the panel itself. */
+  padding: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gd-slider-strip { transition: none; }
+}
+
+.gd-export-row {
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+.gd-export-row:hover { background: var(--mantine-color-default-hover); }
+/* The subtree button is a shortcut, not a second primary control: it stays out
+   of the way until the row is being looked at. It remains keyboard reachable —
+   opacity, not display — and comes back on focus. */
+.gd-export-subtree { opacity: 0; transition: opacity 0.12s ease; }
+.gd-export-row:hover .gd-export-subtree,
+.gd-export-subtree:focus-visible { opacity: 1; }
+.gd-anim-off .gd-export-subtree { transition: none; }
+
+.gd-export-tree {
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  padding: 6px;
+}
+.gd-export-key {
+  padding: 8px 10px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+}

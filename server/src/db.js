@@ -202,6 +202,39 @@ CREATE INDEX IF NOT EXISTS perf_samples_ts_idx ON perf_samples (ts DESC);
 CREATE INDEX IF NOT EXISTS perf_samples_kind_idx ON perf_samples (source, kind, ts DESC);
 CREATE INDEX IF NOT EXISTS perf_samples_name_idx ON perf_samples (kind, name, ts DESC);
 
+-- A revocable, per-space credential that lets another Diomedes workspace pull a
+-- frozen slice of this space over the network.
+--
+-- The selection is stored here rather than recomputed at pull time on purpose.
+-- A key is a promise about *what* was shared, and the person who minted it is
+-- not around when it is redeemed: if the query re-ran, a page created under an
+-- exported parent next week would silently join an export nobody re-approved,
+-- and a page moved out of the selection would vanish from an import that had
+-- already been run once. Freezing the id list keeps the promise auditable —
+-- what the modal showed is exactly what the other end can ever receive.
+--
+-- Only the sha256 of the secret is stored, like api_tokens: the plaintext is
+-- shown once, at mint time, and cannot be recovered from a database dump.
+-- key_prefix is the first few characters, kept so the management list can
+-- name a key without being able to reconstruct it.
+CREATE TABLE IF NOT EXISTS space_export_keys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  space_id uuid NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  key_hash text UNIQUE NOT NULL,
+  key_prefix text NOT NULL,
+  -- [{ id, includeContent }] in document order. includeContent false marks an
+  -- ancestor carried along only to keep the tree shape intact.
+  selection jsonb NOT NULL DEFAULT '[]',
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  last_used_at timestamptz,
+  use_count int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS space_export_keys_space_idx ON space_export_keys (space_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS attachments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   page_id uuid REFERENCES pages(id) ON DELETE CASCADE,

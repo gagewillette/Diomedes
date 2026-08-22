@@ -7,7 +7,7 @@ import {
 import {
   IconPlus, IconTrash, IconUsers, IconSettings, IconFileImport, IconRestore,
   IconFileText, IconDots, IconX, IconInfoCircle, IconPaperclip, IconDatabase,
-  IconHistory, IconMessage,
+  IconHistory, IconMessage, IconKey,
 } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
@@ -19,6 +19,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { makeConfirmPhrase, confirmPhraseMatches, CONFIRM_LENGTH } from '../lib/confirmPhrase.js';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
 import Emoji from '../components/Emoji.jsx';
+import SpaceExportModal from '../components/SpaceExportModal.jsx';
 
 export default function SpaceHome() {
   const { slug } = useParams();
@@ -30,6 +31,7 @@ export default function SpaceHome() {
   const [trashOpen, trashHandlers] = useDisclosure(false);
   const [settingsOpen, settingsHandlers] = useDisclosure(false);
   const [infoOpen, infoHandlers] = useDisclosure(false);
+  const [exportOpen, exportHandlers] = useDisclosure(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -126,6 +128,11 @@ export default function SpaceHome() {
             <ActionIcon variant="default" onClick={infoHandlers.open}><IconInfoCircle size={16} /></ActionIcon>
           </Tooltip>
           {isSpaceAdmin && (
+            <Tooltip label="Share with another workspace">
+              <ActionIcon variant="default" onClick={exportHandlers.open}><IconKey size={16} /></ActionIcon>
+            </Tooltip>
+          )}
+          {isSpaceAdmin && (
             <Tooltip label="Space settings">
               <ActionIcon variant="default" onClick={settingsHandlers.open}><IconSettings size={16} /></ActionIcon>
             </Tooltip>
@@ -161,6 +168,7 @@ export default function SpaceHome() {
         onSaved={load} canDelete={isAdmin}
         onDeleted={() => { window.dispatchEvent(new Event('spaces-changed')); navigate('/'); }}
       />
+      <SpaceExportModal space={space} opened={exportOpen} onClose={exportHandlers.close} />
     </Container>
   );
 }
