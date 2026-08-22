@@ -10,6 +10,10 @@ const CHANNEL = 'diomedes:events';
 const HEARTBEAT_MS = 25_000;
 
 const clients = new Set(); // { userId, res }
+// Guests reading a shared page have no session, so they cannot join `clients`.
+// They get their own set keyed by the share token they are viewing, which is
+// the only identity a public reader has. See addPublicClient.
+const publicClients = new Set(); // { token, res }
 let publisher = null;
 
 export function initEvents(redis) {
@@ -30,17 +34,33 @@ export function initEvents(redis) {
     .catch((err) => console.error('event subscriber failed', err.message));
 }
 
-function deliver({ userIds, ...payload }) {
-  if (!clients.size) return;
-  const targets = userIds?.length ? new Set(userIds) : null;
+function deliver({ userIds, tokens, ...payload }) {
+  if (!clients.size && !publicClients.size) return;
+  // `userIds` and `tokens` are routing, not content: they say who the event is
+  // for and must never reach the wire — a public frame carrying the token list
+  // would hand every guest the other pages' links.
   const frame = `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`;
-  for (const client of clients) {
-    if (targets && !targets.has(client.userId)) continue;
+  const write = (res) => {
     try {
-      client.res.write(frame);
+      res.write(frame);
     } catch {
       /* socket already gone; the close handler will clean it up */
     }
+  };
+
+  const targets = userIds?.length ? new Set(userIds) : null;
+  for (const client of clients) {
+    if (targets && !targets.has(client.userId)) continue;
+    write(client.res);
+  }
+
+  // Unlike the signed-in fan-out, an event with no `tokens` reaches no guest at
+  // all: public streams are opt-in per event, so nothing leaks by default.
+  if (!tokens?.length) return;
+  const publicTargets = new Set(tokens);
+  for (const client of publicClients) {
+    if (!publicTargets.has(client.token)) continue;
+    write(client.res);
   }
 }
 
@@ -54,7 +74,10 @@ export function publish(event) {
   });
 }
 
-export function addClient(req, res) {
+// The wire setup every stream needs, whatever identity is on the other end.
+// Returns a function that registers the caller's own teardown alongside the
+// heartbeat's.
+function openStream(req, res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -67,9 +90,6 @@ export function addClient(req, res) {
   req.socket.setKeepAlive(true);
   res.write('retry: 3000\n\n');
 
-  const client = { userId: req.user.id, res };
-  clients.add(client);
-
   const beat = setInterval(() => {
     try {
       res.write(': ping\n\n');
@@ -78,12 +98,32 @@ export function addClient(req, res) {
     }
   }, HEARTBEAT_MS);
 
-  const close = () => {
-    clearInterval(beat);
-    clients.delete(client);
+  return (onClose) => {
+    const close = () => {
+      clearInterval(beat);
+      onClose();
+    };
+    req.on('close', close);
+    res.on('close', close);
   };
-  req.on('close', close);
-  res.on('close', close);
+}
+
+export function addClient(req, res) {
+  const onClose = openStream(req, res);
+  const client = { userId: req.user.id, res };
+  clients.add(client);
+  onClose(() => clients.delete(client));
+}
+
+// A guest viewing /share/:token. That token is the whole identity a public
+// reader has, so it is what the stream is keyed by. A revoked token still gets
+// a stream on purpose: that open connection is how the viewer finds out the
+// page has been shared again.
+export function addPublicClient(req, res, token) {
+  const onClose = openStream(req, res);
+  const client = { token, res };
+  publicClients.add(client);
+  onClose(() => publicClients.delete(client));
 }
 
 const uniq = (ids) => [...new Set(ids.filter(Boolean))];

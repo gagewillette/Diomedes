@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS pages (
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
   share_token text UNIQUE,
+  -- The token a revoked share used to have. Revoking clears share_token —
+  -- so every "is this page shared?" check keeps working unchanged — but the
+  -- string is kept here so turning sharing back on restores the same URL
+  -- rather than minting one the people already holding the link don't have.
+  share_token_prev text,
   tsv tsvector
 );
 CREATE INDEX IF NOT EXISTS pages_space_idx ON pages (space_id) WHERE deleted_at IS NULL;
@@ -336,6 +341,12 @@ export async function migrate() {
   // client/src/lib/commentAnchor.js for the shape and why it lives here rather
   // than as a mark in the document.
   await q(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor jsonb`);
+  // See the note on pages.share_token_prev in SCHEMA: it holds the token of a
+  // revoked share so re-enabling sharing hands back the same link. The index
+  // backs the public event stream, which a viewer keeps open on a token that is
+  // no longer the live one so it can be told when the page comes back.
+  await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS share_token_prev text`);
+  await q(`CREATE INDEX IF NOT EXISTS pages_share_token_prev_idx ON pages (share_token_prev)`);
   // Block storage. Additive for existing deployments; a fresh database gets
   // these from SCHEMA above and the ALTERs are no-ops.
   await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS rev bigint NOT NULL DEFAULT 0`);

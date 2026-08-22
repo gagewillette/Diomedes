@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Container, Title, Text, Center, Loader, Group, Divider } from '@mantine/core';
 import { useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -7,6 +7,7 @@ import Editor from '../editor/Editor.jsx';
 import FindBar from '../components/FindBar.jsx';
 import { useDocumentIdentity } from '../lib/documentTitle.js';
 import { setPublicShareView, clearPublicShareView } from '../lib/publicShare.js';
+import { startPublicRealtime } from '../lib/realtime.js';
 import Emoji from '../components/Emoji.jsx';
 
 export default function SharePage() {
@@ -16,20 +17,53 @@ export default function SharePage() {
   const [editor, setEditor] = useState(null);
   const [findOpen, setFindOpen] = useState(false);
 
+  const load = useCallback(() => {
+    let live = true;
+    api.get(`/api/public/${token}`, { noRedirect: true })
+      .then((next) => {
+        if (!live) return;
+        setData(next);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!live) return;
+        // Whatever is on screen came from a link that no longer works, so it
+        // goes away in the same breath as the reason why.
+        setData(null);
+        setError(err.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [token]);
+
   // Following a link from one shared page to another keeps this component
   // mounted, so the previous document — and the link map that came with it —
   // has to be dropped before the new one arrives.
   useEffect(() => {
     setData(null);
     setError(null);
-    let live = true;
-    api.get(`/api/public/${token}`, { noRedirect: true })
-      .then((next) => live && setData(next))
-      .catch((err) => live && setError(err.message));
-    return () => {
-      live = false;
-    };
-  }, [token]);
+    return load();
+  }, [token, load]);
+
+  // A share link is a live permission, not a snapshot taken when the page
+  // loaded. Revoking it has to close this view where it already sits open, and
+  // sharing the page again has to reopen it — a reader looking at a revoked
+  // page should never have to guess when to try refreshing.
+  useEffect(
+    () =>
+      startPublicRealtime(token, (type, detail) => {
+        // 'reconnected' means events were missed while the stream was down, so
+        // the current state has to be asked for rather than assumed.
+        if (type === 'reconnected' || detail.shared) {
+          load();
+          return;
+        }
+        setData(null);
+        setError('This link is invalid or has been revoked');
+      }),
+    [token, load]
+  );
 
   // Links out of this document are resolved against the tokens the server sent
   // with it, so a link to another public page keeps the guest in the public

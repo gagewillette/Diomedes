@@ -12,6 +12,7 @@ import { uploadsEnabled, uploadMaxBytes, getWorkspace } from '../lib/workspace.j
 import { PDF_MIME, docTypeFor, inlineAllowed } from '../lib/doctypes.js';
 import { STORAGE_PATH } from '../lib/storage.js';
 import { publicLinkTargets } from '../lib/publicLinks.js';
+import { addPublicClient } from '../lib/events.js';
 
 export { STORAGE_PATH };
 
@@ -266,6 +267,26 @@ router.get(
     // instead of hitting the login screen. See lib/publicLinks.js.
     const publicLinks = await publicLinkTargets(rows[0].content);
     res.json({ page: rows[0], workspaceName: workspace.name, publicLinks });
+  })
+);
+
+// Live permission changes for a guest sitting on a shared page — no auth, and
+// deliberately reachable with a token that is no longer the live one. A viewer
+// whose link was just revoked keeps this stream open, and it is what tells them
+// the moment the page is shared again; requiring a live token here would mean
+// the only way back was a manual refresh.
+router.get(
+  '/public/:token/events',
+  asyncRoute(async (req, res) => {
+    const { rows } = await q(
+      `SELECT 1 FROM pages
+       WHERE (share_token = $1 OR share_token_prev = $1) AND deleted_at IS NULL`,
+      [req.params.token]
+    );
+    // A token that never named a page gets nothing to hold open. This says no
+    // more than the page fetch above already does.
+    if (!rows[0]) throw httpError(404, 'This link is invalid or has been revoked');
+    addPublicClient(req, res, req.params.token);
   })
 );
 

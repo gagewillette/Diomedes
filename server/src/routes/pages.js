@@ -1017,13 +1017,41 @@ router.delete(
 
 // ---- sharing ----
 
+// Sharing a page changes what two different audiences are allowed to see, so
+// both hear about it on the same event: everyone who can open the page in the
+// app (their share toggle and copyable link follow along), and the guests
+// currently sitting on /share/<token>, whose view has to close or reopen the
+// moment the switch flips rather than at their next refresh.
+async function announceShare(page, token, shared) {
+  const userIds = await spaceAudience(page.space_id);
+  publish({
+    type: 'page-share-changed',
+    pageId: page.id,
+    spaceId: page.space_id,
+    shared,
+    // Guests learn only that the page they are on changed state — never the
+    // token, which they already hold, and never another page's.
+    ...(shared ? { token } : {}),
+    userIds,
+    tokens: token ? [token] : [],
+  });
+}
+
 router.post(
   '/pages/:id/share',
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    const token = page.share_token || randomToken();
-    await q('UPDATE pages SET share_token = $1 WHERE id = $2', [token, page.id]);
+    // Re-use the token a previous share had, so someone holding a link that
+    // went dead gets it back rather than being stranded on a URL that will
+    // never work again — which is also what lets a revoked viewer recover the
+    // moment the page is shared again. Read here rather than through getPage():
+    // a retired token is server-side bookkeeping and has no business riding
+    // along on every page fetch.
+    const { rows: prev } = await q('SELECT share_token_prev FROM pages WHERE id = $1', [page.id]);
+    const token = page.share_token || prev[0]?.share_token_prev || randomToken();
+    await q('UPDATE pages SET share_token = $1, share_token_prev = $1 WHERE id = $2', [token, page.id]);
+    await announceShare(page, token, true);
     res.json({ token });
   })
 );
@@ -1033,7 +1061,14 @@ router.delete(
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'writer');
-    await q('UPDATE pages SET share_token = NULL WHERE id = $1', [page.id]);
+    // share_token goes to NULL, which is what every "is this page shared?"
+    // check in the codebase reads, so access dies with this statement. The
+    // string survives in share_token_prev only so the link can be handed back
+    // if sharing is turned on again.
+    await q('UPDATE pages SET share_token = NULL, share_token_prev = COALESCE(share_token, share_token_prev) WHERE id = $1', [
+      page.id,
+    ]);
+    await announceShare(page, page.share_token, false);
     res.json({ ok: true });
   })
 );

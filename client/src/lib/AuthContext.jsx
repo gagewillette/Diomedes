@@ -74,6 +74,12 @@ export function AuthProvider({ children }) {
           // reroutes; everyone else has already been covered by 'pages-changed'.
           emit('page-moved', detail);
           break;
+        case 'page-share-changed':
+          // Someone turned a public link on or off. Whoever has that page open
+          // sees their share switch and link follow along, so two people are
+          // never looking at opposite answers to "is this page public?".
+          emit('page-share-changed', detail);
+          break;
         case 'workspace-settings-changed':
           // Workspace-wide switches take effect everywhere at once: the payload
           // carries the new settings, so no refetch is needed.
