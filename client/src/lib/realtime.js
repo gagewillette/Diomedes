@@ -8,6 +8,7 @@ const EVENT_TYPES = [
   'workspace-settings-changed',
   'pages-changed',
   'page-moved',
+  'active-window-changed',
 ];
 
 const MAX_ATTEMPTS = 8;
