@@ -143,6 +143,10 @@ CREATE TABLE IF NOT EXISTS comments (
   parent_id uuid REFERENCES comments(id) ON DELETE CASCADE,
   user_id uuid REFERENCES users(id) ON DELETE SET NULL,
   content text NOT NULL,
+  -- Null for a comment about the whole page; {blockId, quote, offset, prefix,
+  -- suffix} for one about a phrase in it. Re-resolved against the live document
+  -- on every read — see client/src/lib/commentAnchor.js.
+  anchor jsonb,
   resolved boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -327,6 +331,11 @@ export async function migrate() {
     `ALTER TABLE pages ADD COLUMN IF NOT EXISTS embedding_status text NOT NULL DEFAULT 'disabled'
      CHECK (embedding_status IN ('pending','processing','ready','failed','disabled'))`
   );
+  // Text-anchored comments. Null for every comment that already exists, which
+  // is exactly right: they were all made about the page as a whole. See
+  // client/src/lib/commentAnchor.js for the shape and why it lives here rather
+  // than as a mark in the document.
+  await q(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor jsonb`);
   // Block storage. Additive for existing deployments; a fresh database gets
   // these from SCHEMA above and the ALTERs are no-ops.
   await q(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS rev bigint NOT NULL DEFAULT 0`);

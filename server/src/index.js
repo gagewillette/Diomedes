@@ -20,6 +20,7 @@ import { attachCollab } from './collab/index.js';
 import eventRoutes from './routes/events.js';
 import perfRoutes from './routes/perf.js';
 import { perfMiddleware, initPerf, prune } from './lib/perf.js';
+import { compressionMiddleware } from './lib/compress.js';
 import { perfLoggingEnabled } from './lib/workspace.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,9 @@ async function main() {
   // Before the routes so it wraps everything, after the session so a sample can
   // be attributed to a user once a route resolves one.
   app.use(perfMiddleware);
+
+  // Outside perfMiddleware on purpose — see lib/compress.js.
+  app.use(compressionMiddleware);
 
   app.get('/api/health', async (_req, res) => res.json({ ok: true, search: await searchHealth() }));
   app.use('/api/auth', authRoutes(redis));

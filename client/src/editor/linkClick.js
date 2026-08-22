@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { normalizeUrl } from './linkUrl.js';
+import { publicShareHrefFor } from '../lib/publicShare.js';
 
 /**
  * Clicking a link opens it in a new tab — while reading and while editing.
@@ -93,8 +94,15 @@ export const LinkClick = Extension.create({
               // tab would be a strange way to scroll down.
               if (href.startsWith('#')) return false;
 
+              // A guest on a public share link has no session, so a plain link
+              // written as `/s/<space>/p/<id>` would open the login screen. If
+              // that page is shared publicly too, open its share link instead
+              // and keep the reader in the public app; if it is not, the path
+              // stands and logging in is still the right answer.
+              const target = publicShareHrefFor(href) || href;
+
               event.preventDefault();
-              window.open(href, '_blank', 'noopener,noreferrer');
+              window.open(target, '_blank', 'noopener,noreferrer');
               return true;
             },
           },

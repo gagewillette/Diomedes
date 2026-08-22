@@ -41,7 +41,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Docmost capability | Diomedes |
 |---|---|
 | Real-time multi-cursor co-editing (Yjs/Hocuspocus) | ✅ Yjs CRDT over a websocket at `/api/collab/<pageId>`, persisted to postgres and mirrored between app processes over Redis. Live carets while typing, Miro-style mouse pointers while reading, colours derived from the user id — see [docs/realtime-collaboration.md](docs/realtime-collaboration.md) |
-| Comments (inline, threaded) | ✅ Page-level threaded comments with resolve — not anchored to text ranges |
+| Comments (inline, threaded) | ✅ Threaded comments with resolve, page-level or anchored to a highlighted phrase; hovering an anchored comment jumps to and highlights its text |
 | Page history & version restore | ✅ Automatic snapshots (max one per 10 min of editing) + restore |
 | Find in page (Ctrl/⌘+F) | ✅ Overrides the browser's find — literal or regular-expression search with match counter, next/previous, case toggle and in-place highlighting; works on shared read-only pages too |
 | Full-text search | ✅ Postgres tsvector + GIN index, ranked results with highlighted snippets, scoped to your accessible spaces |
@@ -53,7 +53,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse), into a space or under a top-level page. Notion/Confluence zips ➖ |
 | Export: Markdown / HTML | ✅ Per-page export to .md and .html |
 | Export: page subtree as ZIP | ✅ A page and every page nested under it, at any depth, as one flat archive of markdown files with YAML frontmatter. Available to readers |
-| Public page sharing via link | ✅ Token links, revocable, read-only, no login needed |
+| Public page sharing via link | ✅ Token links, revocable, read-only, no login needed; links to pages that are shared too keep the guest on the public side, and links to private pages still ask them to sign in |
 | Translations (10+ languages) | ➖ English only |
 | Dark mode / themes | ✅ Light/dark toggle |
 
@@ -76,7 +76,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Page-level permissions (Enterprise) | ➖ Space-level scoping only |
 | API & MCP | ✅ Bearer API tokens (Settings → API tokens) work on every endpoint alongside sessions; full surface documented in docs/API.md with an MCP tool sketch |
 | User preferences (docmost: theme/language) | ✅ Per-user editor prefs: font, size, line spacing, page width, smooth caret, animations |
-| Workspace-wide settings | ✅ Settings → Workspace settings (admins only): **Data savings** — turn off live pointers, turn off file uploads (existing files keep working when uploads are off); **Performance** — turn off performance logging, or sample it down |
+| Workspace-wide settings | ✅ Settings → Workspace settings (admins only): **Data savings** — turn off live pointers, turn off file uploads (existing files keep working when uploads are off); **Uploads** — the largest single file anyone can upload (1 MB–512 MB, 512 MB by default; oversized files are refused in the browser, before anything is sent); **Performance** — turn off performance logging, or sample it down |
 | Performance panel | ✅ Workspace info (owners/admins): page-open, interaction, API and server latency as p50/p75/p95/p99 against explicit budgets, web vitals (LCP/INP/CLS/FCP/TTFB), long tasks, error rate, data transfer from both the server and the browser, per-route and per-screen breakdowns, plus workspace content, storage and runtime figures |
 
 ## Infrastructure parity

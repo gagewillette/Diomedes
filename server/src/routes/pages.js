@@ -20,6 +20,7 @@ import { restorePage } from '../lib/pageRestore.js';
 import { generateKeyBetween } from '../lib/orderKey.js';
 import { assertDepthFits, pageLevel, subtreeHeight } from '../lib/pageDepth.js';
 import { publish, spaceAudience } from '../lib/events.js';
+import { normalizeAnchor } from '../lib/commentAnchor.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -1059,11 +1060,15 @@ router.post(
   asyncRoute(async (req, res) => {
     const page = await getPage(req.params.id);
     await assertSpaceRole(req.user, page.space_id, 'reader');
-    const { content, parentId = null } = req.body || {};
+    const { content, parentId = null, anchor = null } = req.body || {};
     if (!content?.trim()) throw httpError(400, 'Comment cannot be empty');
+    // A reply belongs to the thread its parent started, and the thread is what
+    // carries the anchor. Letting a reply point somewhere else would put one
+    // conversation on two pieces of text.
+    const stored = parentId ? null : normalizeAnchor(anchor);
     const { rows } = await q(
-      `INSERT INTO comments (page_id, parent_id, user_id, content) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [page.id, parentId, req.user.id, content.trim()]
+      `INSERT INTO comments (page_id, parent_id, user_id, content, anchor) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [page.id, parentId, req.user.id, content.trim(), stored]
     );
     res.status(201).json({ comment: { ...rows[0], user_name: req.user.name, username: req.user.username } });
   })

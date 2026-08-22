@@ -100,8 +100,23 @@ export async function assertSpaceRole(user, spaceId, minRole) {
   return role;
 }
 
+// Everything on `pages` except `text_content` and `tsv`. Those two are search
+// artifacts -- `text_content` feeds ts_headline, `tsv` is only ever matched
+// against the GIN index -- and no reader of a getPage() result touches either.
+// A `SELECT *` sent both to the browser on every page open, which meant a page
+// response carried the document three times over: once as `content`, which
+// renders, and twice more as text nothing on the client can read.
+//
+// The list is explicit rather than a `SELECT * EXCEPT`, which Postgres does not
+// have. That makes it something a migration has to remember: a column added to
+// the table is invisible here until it is added to this list too.
+const PAGE_COLUMNS = `id, space_id, parent_id, title, icon, content, order_key,
+                      rev, created_by, updated_by, created_at, updated_at,
+                      deleted_at, share_token, collab_seeded,
+                      collab_seed_claimed_at, embedding_status`;
+
 export async function getPage(pageId, { withDeleted = false } = {}) {
-  const { rows } = await q('SELECT * FROM pages WHERE id = $1', [pageId]);
+  const { rows } = await q(`SELECT ${PAGE_COLUMNS} FROM pages WHERE id = $1`, [pageId]);
   const page = rows[0];
   if (!page || (page.deleted_at && !withDeleted)) throw httpError(404, 'Page not found');
   return page;

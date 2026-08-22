@@ -39,3 +39,16 @@ export const httpError = (status, message) => {
 };
 
 export const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+/**
+ * Bytes as a human figure, for messages that name a limit. Decimal units, so a
+ * server message and the admin UI (client/src/lib/format.js) read the same.
+ */
+export function formatBytes(value) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const i = Math.min(units.length - 1, Math.floor(Math.log10(n) / 3));
+  const scaled = n / 1000 ** i;
+  return `${i === 0 ? Math.round(scaled) : scaled.toFixed(1)} ${units[i]}`;
+}
