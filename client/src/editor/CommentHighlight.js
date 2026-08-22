@@ -14,29 +14,69 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { resolveAll } from '../lib/commentAnchor.js';
+import { pickUserColor, withAlpha } from '../lib/userColor.js';
 import { scrollToElement } from '../lib/scrollTo.js';
 
 export const commentHighlightKey = new PluginKey('commentHighlight');
 
 export const COMMENT_ID_ATTR = 'data-comment-id';
 
+// How strongly the author's colour is laid over the text. The resting value has
+// to survive being read *through* — a page can carry a lot of these at once —
+// while the active one has to be unmistakable without hiding the words.
+const RESTING_ALPHA = 0.18;
+const ACTIVE_ALPHA = 0.42;
+
+/**
+ * The inline style for one highlight.
+ *
+ * The colour is the author's presence colour — the same `pickUserColor` the
+ * collaboration caret uses, derived from the user id — so the highlight on a
+ * phrase matches the cursor of the person who commented on it, and a page with
+ * three people's comments reads as three people's comments.
+ *
+ * It has to be an inline style rather than a class: the palette has sixteen
+ * entries and the colour is chosen per comment, so there is no fixed set of
+ * rules a stylesheet could hold. The custom property is published alongside so
+ * CSS can still reach the colour for states it owns, like focus.
+ */
+function highlightStyle(userId, active) {
+  const color = pickUserColor(userId);
+  return [
+    `--gd-comment-color: ${color}`,
+    `background-color: ${withAlpha(color, active ? ACTIVE_ALPHA : RESTING_ALPHA)}`,
+    `border-bottom-color: ${color}`,
+    active ? `box-shadow: 0 0 0 2px ${withAlpha(color, 0.45)}` : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
+}
+
 /**
  * Draw already-resolved anchors.
  *
- * Resolved anchors only: a comment whose text has been deleted has nowhere to
- * be drawn, and the panel says so in words instead.
+ * Two kinds of comment are deliberately not drawn:
+ *
+ *   * one whose text has been deleted — there is nowhere to draw it, and the
+ *     panel says so in words instead;
+ *   * one that has been resolved. A resolved comment is a finished conversation:
+ *     it stays in the sidebar as a record, but the page it was about should read
+ *     as a page with nothing outstanding on it. Note that it is still *resolved*
+ *     in the anchor sense (see resolveAll) — the panel needs that to tell a
+ *     settled comment from one whose text vanished.
  */
 function decorate(doc, resolved, activeId) {
   const decorations = [];
 
   for (const entry of resolved) {
-    if (!entry.range) continue;
+    if (!entry.range || entry.resolved) continue;
+    const active = entry.id === activeId;
     decorations.push(
       Decoration.inline(entry.range.from, entry.range.to, {
         // A distinct class rather than a modifier on the resting one, so the
-        // active highlight can be a different colour entirely without having to
-        // out-specify the base rule.
-        class: entry.id === activeId ? 'gd-comment-mark gd-comment-mark--active' : 'gd-comment-mark',
+        // active state can be styled without having to out-specify the base.
+        class: active ? 'gd-comment-mark gd-comment-mark--active' : 'gd-comment-mark',
+        style: highlightStyle(entry.userId, active),
         [COMMENT_ID_ATTR]: entry.id,
         // The looser match is still worth drawing — the words are right even
         // though the block they were taken from is gone — but not worth

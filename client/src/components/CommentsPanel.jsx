@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { quotePreview } from '../lib/commentAnchor.js';
+import { pickUserColor } from '../lib/userColor.js';
 
 /**
  * The quoted text a comment is attached to.
@@ -14,8 +15,9 @@ import { quotePreview } from '../lib/commentAnchor.js';
  * thread about a deleted sentence into a thread about nothing. It just stops
  * claiming to be a link to somewhere.
  */
-function Quote({ anchor, orphaned }) {
+function Quote({ anchor, orphaned, resolved, color }) {
   if (!anchor?.quote) return null;
+  const state = orphaned ? 'is-orphaned' : resolved ? 'is-resolved' : '';
   return (
     <Group gap={4} wrap="nowrap" align="flex-start" mb={6}>
       {orphaned ? (
@@ -23,7 +25,15 @@ function Quote({ anchor, orphaned }) {
       ) : (
         <IconQuote size={13} style={{ marginTop: 3, flexShrink: 0, opacity: 0.7 }} />
       )}
-      <Text size="xs" c="dimmed" className={`gd-comment-quote ${orphaned ? 'is-orphaned' : ''}`} lineClamp={2}>
+      <Text
+        size="xs"
+        c="dimmed"
+        className={`gd-comment-quote ${state}`}
+        // The same custom property the highlight publishes, so the rule beside
+        // the quote is the colour of the highlight it refers to.
+        style={{ '--gd-comment-color': color }}
+        lineClamp={2}
+      >
         {quotePreview(anchor)}
       </Text>
     </Group>
@@ -44,7 +54,24 @@ function CommentCard({ c, isReply, user, load, isResolvable, onPreviewComment, o
   // A thread's anchor lives on its first comment, so a reply is "about" the
   // same text and gets the same hover behaviour without repeating the quote.
   const anchored = Boolean(c.anchor?.quote);
-  const orphaned = anchored && isResolvable && !isResolvable(c.id);
+  // A resolved comment is settled, not broken: it is deliberately not drawn on
+  // the page, so it must not be reported as text that has gone missing either.
+  const orphaned = anchored && !c.resolved && isResolvable && !isResolvable(c.id);
+  // Nothing is highlighted for a resolved comment, so there is nothing for a
+  // hover to show.
+  const linked = anchored && !c.resolved && !orphaned;
+  const color = pickUserColor(c.user_id);
+
+  // The second click on Resolve removes the thread. Only offered to someone who
+  // could delete it anyway — the same test the bin uses, because the delete
+  // route it ends up calling applies exactly that rule server-side. For everyone
+  // else the button stays a toggle, which is still the useful thing to have.
+  const mine = c.user_id === user.id;
+  const resolveAction = !c.resolved
+    ? { label: 'Resolve', run: () => api.patch(`/api/comments/${c.id}`, { resolved: true }).then(load) }
+    : mine
+      ? { label: 'Remove this comment', run: () => api.del(`/api/comments/${c.id}`).then(load) }
+      : { label: 'Reopen', run: () => api.patch(`/api/comments/${c.id}`, { resolved: false }).then(load) };
 
   return (
     <Paper
@@ -52,17 +79,18 @@ function CommentCard({ c, isReply, user, load, isResolvable, onPreviewComment, o
       p="xs"
       ml={isReply ? 24 : 0}
       opacity={c.resolved ? 0.6 : 1}
-      className={anchored && !orphaned ? 'gd-comment-card is-anchored' : 'gd-comment-card'}
+      className={linked ? 'gd-comment-card is-anchored' : 'gd-comment-card'}
+      style={{ '--gd-comment-color': color }}
       // The whole card is the hover target, not just the quote: the pointer is
       // already going to the comment to read it, and asking someone to find a
       // small strip of text to hover would make the connection a secret.
-      onMouseEnter={anchored && !orphaned ? () => onPreviewComment?.(c.id) : undefined}
-      onMouseLeave={anchored && !orphaned ? () => onEndPreview?.(c.id) : undefined}
+      onMouseEnter={linked ? () => onPreviewComment?.(c.id) : undefined}
+      onMouseLeave={linked ? () => onEndPreview?.(c.id) : undefined}
       // Keyboard users get the same thing on focus, and a click makes the jump
       // stick rather than fading when the pointer moves away.
-      onFocus={anchored && !orphaned ? () => onPreviewComment?.(c.id) : undefined}
-      onBlur={anchored && !orphaned ? () => onEndPreview?.(c.id) : undefined}
-      tabIndex={anchored && !orphaned ? 0 : undefined}
+      onFocus={linked ? () => onPreviewComment?.(c.id) : undefined}
+      onBlur={linked ? () => onEndPreview?.(c.id) : undefined}
+      tabIndex={linked ? 0 : undefined}
     >
       <Group justify="space-between" mb={4}>
         <Group gap={6}>
@@ -72,9 +100,14 @@ function CommentCard({ c, isReply, user, load, isResolvable, onPreviewComment, o
         </Group>
         <Group gap={2}>
           {!isReply && (
-            <Tooltip label={c.resolved ? 'Reopen' : 'Resolve'}>
-              <ActionIcon size="xs" variant="subtle" color={c.resolved ? 'gray' : 'green'}
-                onClick={() => api.patch(`/api/comments/${c.id}`, { resolved: !c.resolved }).then(load)}>
+            <Tooltip label={resolveAction.label}>
+              <ActionIcon
+                size="xs"
+                variant="subtle"
+                color={c.resolved ? 'gray' : 'green'}
+                aria-label={resolveAction.label}
+                onClick={resolveAction.run}
+              >
                 <IconCheck size={13} />
               </ActionIcon>
             </Tooltip>
@@ -87,7 +120,7 @@ function CommentCard({ c, isReply, user, load, isResolvable, onPreviewComment, o
           )}
         </Group>
       </Group>
-      {!isReply && <Quote anchor={c.anchor} orphaned={orphaned} />}
+      {!isReply && <Quote anchor={c.anchor} orphaned={orphaned} resolved={c.resolved} color={color} />}
       {orphaned && (
         <Text size="xs" c="dimmed" fs="italic" mb={4}>
           The text this refers to is no longer on the page.
@@ -112,6 +145,7 @@ export default function CommentsPanel({
   // it describes belongs to the editor.
   pendingAnchor = null,
   onClearPendingAnchor,
+  onCommentPosted,
   // Hover in, hover out, and "can this comment be jumped to at all" — all three
   // come from the editor, which is the only thing that knows where the text
   // currently is.
@@ -128,14 +162,18 @@ export default function CommentsPanel({
 
   useEffect(() => { if (opened) load(); }, [opened, load]);
 
-  // Arriving with a selection means the person has already decided what they
-  // want to talk about; the only thing left to do is type, so the composer takes
-  // focus and any half-written reply gets out of the way.
+  // Opening the panel means the person has decided to say something; the only
+  // thing left to do is type, so the composer takes focus.
+  //
+  // Keyed on `opened` and nothing else. Following the pending anchor here would
+  // pull focus out of whatever they were doing on every selection change now
+  // that the anchor tracks the selection live — including mid-drag, while they
+  // are still choosing the phrase.
   useEffect(() => {
-    if (!pendingAnchor) return;
+    if (!opened) return;
     setReplyTo(null);
     composerRef.current?.focus();
-  }, [pendingAnchor]);
+  }, [opened]);
 
   const submit = async () => {
     if (!draft.trim()) return;
@@ -147,7 +185,8 @@ export default function CommentsPanel({
     });
     setDraft('');
     setReplyTo(null);
-    onClearPendingAnchor?.();
+    // Back to following the selection: the next comment is a new decision.
+    onCommentPosted?.();
     load();
   };
 

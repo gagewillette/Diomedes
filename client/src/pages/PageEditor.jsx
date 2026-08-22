@@ -19,6 +19,7 @@ import { exportPageZip } from '../lib/exportZip.js';
 import Editor from '../editor/Editor.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import { scrollToComment, setActiveComment } from '../editor/CommentHighlight.js';
+import { buildAnchor } from '../lib/commentAnchor.js';
 import HistoryModal from '../components/HistoryModal.jsx';
 import FindBar from '../components/FindBar.jsx';
 import PresenceBar from '../components/PresenceBar.jsx';
@@ -53,6 +54,14 @@ export default function PageEditor() {
   // the highlight plugin rather than asked for, because the answer is only known
   // after the comment list has reached it — see its `view()`.
   const [resolvedIds, setResolvedIds] = useState(() => new Set());
+  // Set when the anchor was chosen deliberately — the toolbar button, or the
+  // Clear beside the composer. While it is set, moving the selection in the
+  // document leaves the pending anchor alone; see the effect below.
+  const [anchorPinned, setAnchorPinned] = useState(false);
+  // The editor as state as well as a ref, because unlike everything else on
+  // this page the selection watcher has to *subscribe* to it, and a ref
+  // assignment does not re-run an effect.
+  const [editorInstance, setEditorInstance] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
@@ -163,6 +172,7 @@ export default function PageEditor() {
   useEffect(() => {
     setComments([]);
     setPendingAnchor(null);
+    setAnchorPinned(false);
     loadComments();
   }, [pageId, loadComments]);
 
@@ -171,7 +181,45 @@ export default function PageEditor() {
   // which is the honest fallback rather than a silent no-op.
   const startComment = useCallback((anchor) => {
     setPendingAnchor(anchor);
+    setAnchorPinned(true);
     setCommentsOpen(true);
+  }, []);
+
+  // A comment written while text is selected is a comment about that text.
+  //
+  // Reaching for the selection only at the moment Comment is pressed would make
+  // this invisible until after the fact — you would find out what your comment
+  // attached to by reading it back. So the panel follows the selection live and
+  // shows the phrase above the composer, where it can be seen and cleared
+  // before anything is written.
+  //
+  // Only while the panel is open, and only when the anchor has not been pinned
+  // by an explicit choice.
+  useEffect(() => {
+    if (!editorInstance || !commentsOpen || anchorPinned) return undefined;
+
+    const sync = () => {
+      const { from, to } = editorInstance.state.selection;
+      setPendingAnchor(buildAnchor(editorInstance.state.doc, from, to));
+    };
+
+    sync();
+    editorInstance.on('selectionUpdate', sync);
+    return () => editorInstance.off('selectionUpdate', sync);
+  }, [editorInstance, commentsOpen, anchorPinned]);
+
+  // Clearing the quote says "this one is about the page". That has to stick, or
+  // the anchor the watcher above just removed would come straight back from the
+  // selection that is still sitting in the document.
+  const clearPendingAnchor = useCallback(() => {
+    setPendingAnchor(null);
+    setAnchorPinned(true);
+  }, []);
+
+  // Back to following the selection, for whatever gets written next.
+  const releaseAnchor = useCallback(() => {
+    setPendingAnchor(null);
+    setAnchorPinned(false);
   }, []);
 
   // Hovering a comment sends the document to its text and lights it up; leaving
@@ -573,6 +621,7 @@ export default function PageEditor() {
           onUpdate={onEditorUpdate}
           onReady={(editor) => {
             editorRef.current = editor;
+            setEditorInstance(editor);
             // A fresh editor per page — the key above sees to that — so the
             // "has the cursor been anywhere" flag resets with it, and a click
             // into the document counts as much as a Ctrl+L does.
@@ -605,13 +654,14 @@ export default function PageEditor() {
         opened={commentsOpen}
         onClose={() => {
           setCommentsOpen(false);
-          setPendingAnchor(null);
+          releaseAnchor();
           setActiveComment(editorRef.current, null);
         }}
         comments={comments}
         onReload={loadComments}
         pendingAnchor={pendingAnchor}
-        onClearPendingAnchor={() => setPendingAnchor(null)}
+        onClearPendingAnchor={clearPendingAnchor}
+        onCommentPosted={releaseAnchor}
         onPreviewComment={previewComment}
         onEndPreview={endPreview}
         isResolvable={isResolvable}

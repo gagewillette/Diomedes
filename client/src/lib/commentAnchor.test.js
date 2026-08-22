@@ -160,6 +160,29 @@ test('resolveAll skips page-level comments and reports orphans', () => {
   assert.equal(resolved[1].range, null);
 });
 
+test('resolveAll carries the author and the resolved flag', () => {
+  const document = doc(p('blk_a', 'findable text'));
+  const anchor = buildAnchor(document, 1, 9);
+
+  const resolved = resolveAll(document, [
+    { id: 'a', user_id: 'user-1', resolved: false, anchor },
+    { id: 'b', user_id: 'user-2', resolved: true, anchor },
+    { id: 'c', anchor },
+  ]);
+
+  assert.deepEqual(
+    resolved.map((r) => ({ id: r.id, userId: r.userId, resolved: r.resolved })),
+    [
+      { id: 'a', userId: 'user-1', resolved: false },
+      { id: 'b', userId: 'user-2', resolved: true },
+      // Neither field is required to be present on the row.
+      { id: 'c', userId: null, resolved: false },
+    ],
+  );
+  // A resolved comment is still located — it is only left undrawn.
+  assert.ok(resolved[1].range);
+});
+
 test('quotePreview collapses whitespace and truncates', () => {
   assert.equal(quotePreview({ quote: '  a\n  b  ' }), 'a b');
   assert.equal(quotePreview({ quote: 'x'.repeat(20) }, 10).length, 10);

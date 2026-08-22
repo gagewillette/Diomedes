@@ -256,12 +256,25 @@ export function resolveAnchor(doc, anchor) {
  * Comments without an anchor are page-level and are simply left out; a comment
  * whose anchor no longer resolves is reported with `range: null`, which is what
  * the panel renders as "original text was removed".
+ *
+ * `userId` rides along because the highlight is drawn in its author's presence
+ * colour — the same colour their caret has — so a page with several people's
+ * comments on it reads as several people's comments.
  */
 export function resolveAll(doc, comments) {
   const out = [];
   for (const comment of comments || []) {
     if (!comment?.anchor?.quote) continue;
-    out.push({ id: comment.id, anchor: comment.anchor, range: resolveAnchor(doc, comment.anchor) });
+    out.push({
+      id: comment.id,
+      userId: comment.user_id ?? null,
+      // A resolved comment is still *resolvable* — its text is still findable,
+      // and the panel needs to know that to tell "settled" apart from "the text
+      // this was about is gone". It simply stops being drawn; see decorate().
+      resolved: Boolean(comment.resolved),
+      anchor: comment.anchor,
+      range: resolveAnchor(doc, comment.anchor),
+    });
   }
   return out;
 }
