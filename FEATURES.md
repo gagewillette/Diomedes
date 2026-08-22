@@ -53,7 +53,7 @@ no Docmost code is reused (Docmost is AGPL; this avoids any licensing entangleme
 | Import: Markdown / HTML / Notion zip | ✅ Markdown file import (client-side parse), into a space or under a top-level page. Notion/Confluence zips ➖ |
 | Export: Markdown / HTML | ✅ Per-page export to .md and .html |
 | Export: page subtree as ZIP | ✅ A page and every page nested under it, at any depth, as one flat archive of markdown files with YAML frontmatter. Available to readers |
-| Public page sharing via link | ✅ Token links, revocable, read-only, no login needed |
+| Public page sharing via link | ✅ Token links, revocable, read-only, no login needed; links to pages that are shared too keep the guest on the public side, and links to private pages still ask them to sign in |
 | Translations (10+ languages) | ➖ English only |
 | Dark mode / themes | ✅ Light/dark toggle |
 

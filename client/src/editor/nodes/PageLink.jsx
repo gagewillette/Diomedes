@@ -10,6 +10,7 @@ import { subscribeTitle, getCachedTitle } from './pageTitles.js';
 import { subscribeLabel, getCachedLabel } from './pageLabels.js';
 import PagePicker from '../../components/PagePicker.jsx';
 import { findWikiLinkMatch } from './wikiLinkMatch.js';
+import { publicShareHref } from '../../lib/publicShare.js';
 
 // Where the editor currently is. Set by Editor.jsx before rendering, so the
 // suggestion plugin — which lives outside React — knows which space to search
@@ -79,7 +80,12 @@ function PageLinkView({ node, updateAttributes, editor }) {
   const target = pageId ? live : byLabel;
   const resolved = Boolean(resolvedId) && target !== null;
   const text = (target?.title ?? label) || 'Untitled';
-  const href = resolved ? pageHref(target?.spaceSlug || spaceSlug, resolvedId) : null;
+  // A guest reading a public share link has no session, so the in-app path
+  // would land them on the login screen. When the target is shared publicly
+  // too, its own share link is where they belong; when it is not, the app path
+  // stands and logging in is the honest answer. See lib/publicShare.js.
+  const publicHref = resolved ? publicShareHref(resolvedId) : null;
+  const href = publicHref || (resolved ? pageHref(target?.spaceSlug || spaceSlug, resolvedId) : null);
 
   // A link written by the MCP server or an import names a title that may never
   // have had a page — or may have one under a slightly different title. The chip
